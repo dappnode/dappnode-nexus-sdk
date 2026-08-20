@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/dappnode/dappnode-nexus-sdk/internal/attestation"
+	"github.com/dappnode/dappnode-nexus-sdk/internal/ledger"
 	ehbpclient "github.com/tinfoilsh/encrypted-http-body-protocol/client"
 	"github.com/tinfoilsh/encrypted-http-body-protocol/identity"
 )
@@ -22,8 +23,9 @@ type evidenceVerifier interface {
 }
 
 type verifiedSession struct {
-	client    *http.Client
-	expiresAt time.Time
+	client        *http.Client
+	expiresAt     time.Time
+	attestationID string
 }
 
 // Client maintains a short-lived EHBP session derived from fresh Nitro
@@ -33,6 +35,7 @@ type Client struct {
 	verifier evidenceVerifier
 	wire     *http.Client
 	now      func() time.Time
+	ledger   *ledger.Ledger
 
 	mu      sync.Mutex
 	session *verifiedSession
@@ -61,6 +64,14 @@ func NewClient(endpoint string, verifier evidenceVerifier, wire *http.Client) (*
 	}, nil
 }
 
+// WithLedger records every verification attempt in the local verification
+// ledger. The ledger receives evidence and metadata only, never request or
+// response bodies.
+func (c *Client) WithLedger(record *ledger.Ledger) *Client {
+	c.ledger = record
+	return c
+}
+
 func validateEndpoint(raw string) error {
 	parsed, err := url.ParseRequestURI(raw)
 	if err != nil {
@@ -82,19 +93,20 @@ func (c *Client) WarmUp(ctx context.Context) error {
 }
 
 // Do sends one JSON envelope. The Authorization header remains outside EHBP,
-// matching the existing Gateway API. No request is automatically retried.
-func (c *Client) Do(ctx context.Context, authorization, accept, userAgent string, envelope []byte) (*http.Response, error) {
+// matching the existing Gateway API. No request is automatically retried. The
+// returned identifier names the attested key the body was encrypted to.
+func (c *Client) Do(ctx context.Context, authorization, accept, userAgent string, envelope []byte) (*http.Response, string, error) {
 	if len(envelope) == 0 {
-		return nil, errors.New("confidential request envelope is empty")
+		return nil, "", errors.New("confidential request envelope is empty")
 	}
 	session, err := c.sessionFor(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(envelope))
 	if err != nil {
-		return nil, fmt.Errorf("create confidential Gateway request: %w", err)
+		return nil, session.attestationID, fmt.Errorf("create confidential Gateway request: %w", err)
 	}
 	// EHBP v0.2.6 clones GetBody unchanged. Remove the plaintext replay closure
 	// in addition to rejecting every redirect at both HTTP client layers.
@@ -117,9 +129,9 @@ func (c *Client) Do(ctx context.Context, authorization, accept, userAgent string
 		if identity.IsKeyConfigError(err) {
 			c.invalidate(session)
 		}
-		return nil, fmt.Errorf("confidential Gateway exchange failed: %w", err)
+		return nil, session.attestationID, fmt.Errorf("confidential Gateway exchange failed: %w", err)
 	}
-	return response, nil
+	return response, session.attestationID, nil
 }
 
 func (c *Client) sessionFor(ctx context.Context) (*verifiedSession, error) {
@@ -132,13 +144,17 @@ func (c *Client) sessionFor(ctx context.Context) (*verifiedSession, error) {
 
 	evidence, err := c.verifier.Verify(ctx)
 	if err != nil {
+		c.ledger.RecordRejected(err.Error())
 		return nil, fmt.Errorf("verify Gateway attestation: %w", err)
 	}
 	if evidence == nil || !c.now().Before(evidence.ExpiresAt) {
-		return nil, errors.New("Gateway attestation has no remaining validity")
+		const failure = "Gateway attestation has no remaining validity"
+		c.ledger.RecordRejected(failure)
+		return nil, errors.New(failure)
 	}
 	serverIdentity, err := identity.FromPublicKeyBytes(evidence.PublicKey)
 	if err != nil {
+		c.ledger.RecordRejected(err.Error())
 		return nil, fmt.Errorf("use attested Gateway HPKE key: %w", err)
 	}
 	ehbpTransport, err := ehbpclient.NewTransportWithIdentity(
@@ -146,10 +162,18 @@ func (c *Client) sessionFor(ctx context.Context) (*verifiedSession, error) {
 		ehbpclient.WithHTTPClient(c.wire),
 	)
 	if err != nil {
+		c.ledger.RecordRejected(err.Error())
 		return nil, fmt.Errorf("create attested EHBP transport: %w", err)
 	}
 
+	attestationID := ledger.FingerprintKey(evidence.PublicKey)
+	if c.ledger != nil {
+		record, document, manifest := describeEvidence(attestationID, evidence, c.now().UTC())
+		c.ledger.RecordVerified(record, document, manifest)
+	}
+
 	c.session = &verifiedSession{
+		attestationID: attestationID,
 		client: &http.Client{
 			Transport: ehbpTransport,
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {

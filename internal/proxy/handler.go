@@ -18,10 +18,16 @@ import (
 	"time"
 
 	"github.com/dappnode/dappnode-nexus-sdk/internal/jsonutil"
+	"github.com/dappnode/dappnode-nexus-sdk/internal/ledger"
 )
 
 const (
-	LocalChatEndpoint = "/v1/chat/completions"
+	LocalChatEndpoint   = "/v1/chat/completions"
+	LocalHealthEndpoint = "/healthz"
+
+	LocalVerificationUI       = "/verification"
+	LocalVerificationAPI      = "/v1/verification"
+	LocalVerificationDocument = "/v1/verification/document"
 
 	envelopeSchemaVersion = 1
 	maxRequestBytes       = 10 << 20
@@ -30,7 +36,9 @@ const (
 )
 
 type sender interface {
-	Do(context.Context, string, string, string, []byte) (*http.Response, error)
+	// Do returns the response and the identifier of the attested key the
+	// request body was encrypted to.
+	Do(context.Context, string, string, string, []byte) (*http.Response, string, error)
 }
 
 type envelope struct {
@@ -47,6 +55,9 @@ type Handler struct {
 	logger *log.Logger
 	now    func() time.Time
 	newID  func() (string, error)
+
+	ledger        *ledger.Ledger
+	gatewayOrigin string
 }
 
 func NewHandler(upstream sender, logger *log.Logger) (*Handler, error) {
@@ -64,8 +75,33 @@ func NewHandler(upstream sender, logger *log.Logger) (*Handler, error) {
 	}, nil
 }
 
+// WithVerification serves the local verification surface from record and
+// stores per request metadata in it. Request and response bodies are never
+// stored. gatewayOrigin is shown in the UI so an operator can see which
+// Gateway the evidence belongs to.
+func (h *Handler) WithVerification(record *ledger.Ledger, gatewayOrigin string) *Handler {
+	h.ledger = record
+	h.gatewayOrigin = gatewayOrigin
+	return h
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	if r.URL.Path == LocalHealthEndpoint {
+		h.serveHealth(w, r)
+		return
+	}
+	switch r.URL.Path {
+	case LocalVerificationUI:
+		h.serveVerificationUI(w, r)
+		return
+	case LocalVerificationAPI:
+		h.serveVerificationAPI(w, r)
+		return
+	case LocalVerificationDocument:
+		h.serveVerificationDocument(w, r)
+		return
+	}
 	if r.URL.Path != LocalChatEndpoint {
 		http.NotFound(w, r)
 		return
@@ -110,47 +146,79 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response, err := h.sender.Do(
+	started := h.now()
+	record := ledger.Request{
+		ID:           requestID,
+		StartedAt:    started.UTC(),
+		Outcome:      ledger.OutcomeFailed,
+		RequestBytes: len(requestBody),
+	}
+	defer func() {
+		record.DurationMS = h.now().Sub(started).Milliseconds()
+		h.ledger.RecordRequest(record)
+	}()
+
+	response, attestationID, err := h.sender.Do(
 		r.Context(),
 		r.Header.Get("Authorization"),
 		r.Header.Get("Accept"),
 		r.Header.Get("User-Agent"),
 		encodedEnvelope,
 	)
+	record.AttestationID = attestationID
 	if err != nil {
+		record.Failure = "Gateway attestation or encrypted exchange failed"
 		h.logger.Printf("confidential Gateway request failed: %v", err)
 		writeOpenAIError(w, http.StatusBadGateway, "confidential Gateway verification or exchange failed", "api_error")
 		return
 	}
 	defer response.Body.Close()
+	record.StatusCode = response.StatusCode
 	if response.StatusCode < 200 || response.StatusCode > 599 ||
 		(response.StatusCode >= 300 && response.StatusCode <= 399) ||
 		response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusResetContent {
+		record.Failure = "Gateway returned a status that forbids a body"
 		h.logger.Printf("confidential Gateway returned body-forbidden HTTP status %d", response.StatusCode)
 		writeOpenAIError(w, http.StatusBadGateway, "confidential Gateway returned an invalid response", "api_error")
 		return
 	}
 
 	if isEventStream(response.Header.Get("Content-Type")) {
-		h.forwardEventStream(w, response)
+		record.Streaming = true
+		h.forwardEventStream(w, response, &record)
 		return
 	}
-	h.forwardNormal(w, response)
+	h.forwardNormal(w, response, &record)
 }
 
-func (h *Handler) forwardNormal(w http.ResponseWriter, response *http.Response) {
+func (h *Handler) serveHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method must be GET", "invalid_request_error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, "{\"status\":\"ok\"}\n")
+}
+
+func (h *Handler) forwardNormal(w http.ResponseWriter, response *http.Response, record *ledger.Request) {
 	body, err := jsonutil.ReadAllLimited(response.Body, maxNormalResponse)
 	if err != nil {
+		record.Failure = "authenticated response could not be read"
 		h.logger.Printf("read authenticated Gateway response: %v", err)
 		writeOpenAIError(w, http.StatusBadGateway, "confidential Gateway returned an invalid response", "api_error")
 		return
 	}
 	body = bytes.TrimSpace(body)
 	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' || !json.Valid(body) {
+		record.Failure = "authenticated response was not one complete JSON object"
 		h.logger.Printf("authenticated Gateway response was not one complete JSON object")
 		writeOpenAIError(w, http.StatusBadGateway, "confidential Gateway returned an invalid response", "api_error")
 		return
 	}
+	record.Outcome = ledger.OutcomeEncrypted
+	record.ResponseBytes = int64(len(body))
 	copyResponseHeaders(w.Header(), response.Header)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
@@ -160,7 +228,7 @@ func (h *Handler) forwardNormal(w http.ResponseWriter, response *http.Response) 
 	}
 }
 
-func (h *Handler) forwardEventStream(w http.ResponseWriter, response *http.Response) {
+func (h *Handler) forwardEventStream(w http.ResponseWriter, response *http.Response, record *ledger.Request) {
 	copyResponseHeaders(w.Header(), response.Header)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -173,8 +241,10 @@ func (h *Handler) forwardEventStream(w http.ResponseWriter, response *http.Respo
 	for {
 		count, readErr := reader.Read(buffer)
 		if count > 0 {
+			record.ResponseBytes += int64(count)
 			tracker.Write(buffer[:count])
 			if _, writeErr := w.Write(buffer[:count]); writeErr != nil {
+				record.Failure = "local client disconnected mid-stream"
 				return
 			}
 			if flusher != nil {
@@ -187,11 +257,14 @@ func (h *Handler) forwardEventStream(w http.ResponseWriter, response *http.Respo
 		if errors.Is(readErr, io.EOF) {
 			tracker.Finish()
 			if tracker.done {
+				record.Outcome = ledger.OutcomeEncrypted
 				return
 			}
+			record.Failure = "authenticated event stream ended without a terminating [DONE]"
 			h.logger.Printf("authenticated Gateway event stream ended without data: [DONE]")
 			panic(http.ErrAbortHandler)
 		}
+		record.Failure = "authenticated event stream failed mid-response"
 		h.logger.Printf("authenticated Gateway event stream failed: %v", readErr)
 		panic(http.ErrAbortHandler)
 	}

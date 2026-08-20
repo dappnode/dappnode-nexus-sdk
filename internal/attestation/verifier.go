@@ -71,10 +71,30 @@ type ingressManifest struct {
 
 // Evidence is the verified, signed binding between a measured Gateway build
 // and its process-local EHBP key.
+//
+// Proof carries the signed material behind that binding so the local
+// verification ledger can display it and hand it back for independent
+// re-verification. None of it is secret: it is exactly what a third party
+// needs to re-check this verification offline.
 type Evidence struct {
 	PublicKey  []byte
 	AttestedAt time.Time
 	ExpiresAt  time.Time
+	Proof      Proof
+}
+
+// Proof is the signed evidence and the pinned claims it satisfied.
+type Proof struct {
+	Document        []byte
+	Manifest        json.RawMessage
+	Nonce           []byte
+	ModuleID        string
+	PCRs            map[uint][]byte
+	RootFingerprint string
+	SourceRevision  string
+	Workload        string
+	Profile         string
+	E2EE            E2EEPolicy
 }
 
 // Verifier fetches nonce-bound evidence and validates it against a Policy.
@@ -294,12 +314,32 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 		}
 	}
 
+	retainedPCRs := make(map[uint][]byte, 3)
+	for _, index := range []uint{0, 1, 2} {
+		retainedPCRs[index] = append([]byte(nil), result.Document.PCRs[index]...)
+	}
+
 	return &Evidence{
 		PublicKey:  append([]byte(nil), result.PublicKey...),
 		AttestedAt: attestedAt,
 		ExpiresAt:  attestedAt.Add(v.maxAge),
+		Proof: Proof{
+			Document:        append([]byte(nil), fetched.document...),
+			Manifest:        append(json.RawMessage(nil), fetched.manifest...),
+			Nonce:           append([]byte(nil), result.Nonce...),
+			ModuleID:        result.Document.ModuleID,
+			PCRs:            retainedPCRs,
+			RootFingerprint: result.RootFingerprint,
+			SourceRevision:  v.policy.SourceRevision,
+			Workload:        v.policy.Workload,
+			Profile:         v.policy.Profile,
+			E2EE:            v.policy.E2EE,
+		},
 	}, nil
 }
+
+// MaximumAge is the attestation validity window this verifier enforces.
+func (v *Verifier) MaximumAge() time.Duration { return v.maxAge }
 
 func (v *Verifier) validateManifest(raw json.RawMessage) error {
 	var manifest manifestClaims

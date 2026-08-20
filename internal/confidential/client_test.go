@@ -78,7 +78,7 @@ func TestDoUsesOnlyAttestedKeyAndRemovesPlaintextReplayClosure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = client.Do(context.Background(), "Bearer visible", "application/json", "test", canary)
+	_, _, err = client.Do(context.Background(), "Bearer visible", "application/json", "test", canary)
 	if err == nil || !strings.Contains(err.Error(), "wire inspection") {
 		t.Fatalf("Do() error = %v", err)
 	}

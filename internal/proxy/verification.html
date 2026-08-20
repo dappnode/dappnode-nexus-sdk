@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Nexus — Privacy Verification</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #f0f2f5;
+  --ink: #14181f;
+  --ink-dim: #5c6673;
+  --line: #dfe3e9;
+  --ok: #0f8a4d;
+  --ok-bg: #e6f5ec;
+  --bad: #c62828;
+  --bad-bg: #fdeaea;
+  --accent: #2f5fd0;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c232c;
+    --ink: #e6edf3;
+    --ink-dim: #9aa7b4;
+    --line: #2a323d;
+    --ok: #46d17f;
+    --ok-bg: #12291d;
+    --bad: #ff6b6b;
+    --bad-bg: #2b1516;
+    --accent: #7aa2f7;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 32px 20px 64px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 940px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-dim); margin: 36px 0 12px; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code, .mono { font-family: var(--mono); font-size: 12.5px; }
+
+header.top { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+header.top .sub { color: var(--ink-dim); font-size: 13px; }
+
+.hero { border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; background: var(--panel); }
+.hero.ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); background: var(--ok-bg); }
+.hero.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); background: var(--bad-bg); }
+.hero .verdict { display: flex; align-items: center; gap: 12px; font-size: 19px; font-weight: 640; letter-spacing: -0.01em; }
+.hero.ok .verdict { color: var(--ok); }
+.hero.bad .verdict { color: var(--bad); }
+.hero .why { margin-top: 12px; color: var(--ink); max-width: 68ch; }
+.dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; flex: none; }
+
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 18px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+.stat .n { font-size: 22px; font-weight: 640; font-variant-numeric: tabular-nums; }
+.stat .l { font-size: 12px; color: var(--ink-dim); }
+
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+
+.checks { list-style: none; margin: 0; padding: 0; }
+.checks li { display: flex; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+.checks li:last-child { border-bottom: 0; }
+.checks .mark { flex: none; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: var(--ok); color: var(--bg); }
+.checks .name { font-weight: 600; }
+.checks .detail { color: var(--ink-dim); font-size: 13.5px; margin-top: 2px; }
+
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 20px; margin: 0; }
+dl.facts dt { color: var(--ink-dim); font-size: 13px; }
+dl.facts dd { margin: 0; font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-dim); font-weight: 600; padding: 0 10px 8px 0; }
+td { padding: 9px 10px 9px 0; border-top: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.pill.ok { background: var(--ok-bg); color: var(--ok); }
+.pill.bad { background: var(--bad-bg); color: var(--bad); }
+
+.btn { display: inline-block; padding: 7px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); color: var(--ink); text-decoration: none; font-size: 13px; font-weight: 550; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+
+.note { color: var(--ink-dim); font-size: 13px; max-width: 74ch; }
+.empty { color: var(--ink-dim); font-style: italic; padding: 10px 0; }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <div>
+      <h1>Nexus privacy verification</h1>
+      <div class="sub" id="gateway">&nbsp;</div>
+    </div>
+    <div class="sub" id="refreshed">&nbsp;</div>
+  </header>
+
+  <section id="hero" class="hero"><div class="verdict"><span class="dot"></span><span>Loading…</span></div></section>
+
+  <div class="stats" id="stats"></div>
+
+  <h2>What was checked</h2>
+  <div class="card" id="checks"></div>
+
+  <h2>Evidence</h2>
+  <div class="card" id="evidence"></div>
+
+  <h2>Recent requests</h2>
+  <div class="card"><div class="scroll" id="requests"></div>
+    <p class="note" style="margin-top:14px">This list records only envelope identifiers, timing and sizes. Your prompts and the model's replies are never read or stored by this page — they are encrypted before they leave this proxy and decrypted only inside the enclave.</p>
+  </div>
+
+  <h2>Verification history</h2>
+  <div class="card"><div class="scroll" id="history"></div></div>
+
+  <h2>Trusting this page</h2>
+  <div class="card">
+    <p class="note">This page is rendered by the same proxy that performs the verification, so it cannot prove itself. What it can do is hand you the raw signed evidence. Download the attestation document above and check it with an independent AWS Nitro verifier, then compare the measurements against the trust policy pinned in this package. That check does not depend on anything this page says.</p>
+    <p class="note">Nothing here is written to disk. The history is kept in memory and starts empty after a restart.</p>
+  </div>
+</main>
+
+<script>
+const REFRESH_MS = 5000;
+
+function esc(value) {
+  return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[c]);
+}
+function shortHex(value, keep = 12) {
+  if (!value) return "—";
+  return value.length <= keep * 2 ? value : value.slice(0, keep) + "…" + value.slice(-6);
+}
+function time(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  return isNaN(d) ? "—" : d.toLocaleTimeString();
+}
+function bytes(n) {
+  if (!n) return "0 B";
+  const units = ["B", "KB", "MB"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + " " + units[i];
+}
+
+function renderHero(data) {
+  const hero = document.getElementById("hero");
+  const verified = data.status === "verified";
+  const current = data.current;
+  hero.className = "hero " + (verified ? "ok" : data.status === "starting" ? "" : "bad");
+
+  if (data.status === "starting") {
+    hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Waiting for the first verification</span></div>'
+      + '<p class="why">No request has been sent yet. The proxy verifies the Gateway before it will encrypt anything to it.</p>';
+    return;
+  }
+  if (!verified) {
+    const failure = data.attestations && data.attestations[0] ? data.attestations[0].failure : "";
+    hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Not verified — requests are being refused</span></div>'
+      + '<p class="why">The last check of the Nexus Gateway did not pass, so this proxy refused to encrypt anything to it. '
+      + 'Your prompts were not sent.</p>'
+      + (failure ? '<p class="why mono">' + esc(failure) + "</p>" : "");
+    return;
+  }
+  const expires = current ? new Date(current.expires_at) : null;
+  const left = expires ? Math.max(0, Math.round((expires - new Date()) / 1000)) : 0;
+  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — your requests go only to a measured enclave</span></div>'
+    + '<p class="why">Before sending anything, this proxy asked the Nexus Gateway to prove what it is. AWS Nitro hardware signed a '
+    + 'statement naming the exact software running inside the enclave, and that statement matched the measurements pinned locally in this package. '
+    + 'Your request bodies are then encrypted to a key that only that enclave holds, so the network path in between — including Cloudflare and the host machine — carries ciphertext it cannot read.</p>'
+    + '<p class="why" style="color:var(--ink-dim);font-size:13.5px">This proof is re-checked automatically; the current one is valid for another '
+    + left + "s.</p>";
+}
+
+function renderStats(data) {
+  const items = [
+    ["Requests encrypted", data.encrypted_total],
+    ["Requests failed", data.failed_total],
+    ["Verifications passed", data.verified_total],
+    ["Verifications rejected", data.rejected_total]
+  ];
+  document.getElementById("stats").innerHTML = items.map(
+    ([label, n]) => '<div class="stat"><div class="n">' + (n || 0) + '</div><div class="l">' + esc(label) + "</div></div>"
+  ).join("");
+}
+
+function renderChecks(data) {
+  const target = document.getElementById("checks");
+  const checks = data.current && data.current.checks;
+  if (!checks || !checks.length) {
+    target.innerHTML = '<div class="empty">No passing verification to describe yet.</div>';
+    return;
+  }
+  target.innerHTML = '<ul class="checks">' + checks.map(check =>
+    '<li><span class="mark">✓</span><div><div class="name">' + esc(check.name) + "</div>"
+    + '<div class="detail">' + esc(check.detail) + "</div></div></li>"
+  ).join("") + "</ul>";
+}
+
+function renderEvidence(data) {
+  const target = document.getElementById("evidence");
+  const current = data.current;
+  if (!current) {
+    target.innerHTML = '<div class="empty">No evidence retained yet.</div>';
+    return;
+  }
+  const facts = [
+    ["Attested key ID", current.id],
+    ["Enclave module", current.module_id],
+    ["Attested at", new Date(current.attested_at).toLocaleString()],
+    ["Valid until", new Date(current.expires_at).toLocaleString()],
+    ["Encryption key (X25519)", current.hpke_public_key],
+    ["Challenge nonce", shortHex(current.nonce, 16)],
+    ["PCR0 — enclave image", shortHex(current.pcr0, 16)],
+    ["PCR1 — kernel and bootstrap", shortHex(current.pcr1, 16)],
+    ["PCR2 — application", shortHex(current.pcr2, 16)],
+    ["Gateway source revision", current.source_revision],
+    ["Workload", current.workload + " / " + current.profile],
+    ["AWS root CA fingerprint", shortHex(current.root_fingerprint, 16)]
+  ];
+  target.innerHTML = '<dl class="facts">' + facts.map(
+    ([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v || "—") + "</dd>"
+  ).join("") + "</dl>"
+    + '<div class="row">'
+    + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '">Download attestation document</a>'
+    + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '&part=manifest">Download signed manifest</a>'
+    + '<a class="btn" href="/v1/verification">Raw JSON</a>'
+    + "</div>";
+}
+
+function renderRequests(data) {
+  const target = document.getElementById("requests");
+  const rows = data.requests || [];
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty">No requests yet. Point an app at this proxy and they will appear here.</div>';
+    return;
+  }
+  target.innerHTML = "<table><thead><tr>"
+    + "<th>Time</th><th>Request</th><th>Protection</th><th>Sent</th><th>Received</th><th>Took</th><th>Encrypted to</th>"
+    + "</tr></thead><tbody>"
+    + rows.map(row => {
+      const ok = row.outcome === "encrypted";
+      return "<tr><td>" + time(row.started_at) + "</td>"
+        + '<td class="mono">' + esc(row.id.slice(0, 8)) + (row.streaming ? " <span class=\"pill ok\">stream</span>" : "") + "</td>"
+        + '<td><span class="pill ' + (ok ? "ok" : "bad") + '">' + (ok ? "encrypted" : "failed") + "</span>"
+        + (row.failure ? '<div class="detail" style="color:var(--ink-dim);font-size:12px">' + esc(row.failure) + "</div>" : "") + "</td>"
+        + "<td>" + bytes(row.request_bytes) + "</td>"
+        + "<td>" + bytes(row.response_bytes) + "</td>"
+        + "<td>" + (row.duration_ms || 0) + " ms</td>"
+        + '<td class="mono">' + esc(row.attestation_id || "—") + "</td></tr>";
+    }).join("") + "</tbody></table>";
+}
+
+function renderHistory(data) {
+  const target = document.getElementById("history");
+  const rows = data.attestations || [];
+  if (!rows.length) {
+    target.innerHTML = '<div class="empty">No verifications recorded yet.</div>';
+    return;
+  }
+  target.innerHTML = "<table><thead><tr><th>Checked at</th><th>Result</th><th>Enclave key</th><th>Details</th></tr></thead><tbody>"
+    + rows.map(row => {
+      const ok = row.outcome === "verified";
+      return "<tr><td>" + time(row.verified_at) + "</td>"
+        + '<td><span class="pill ' + (ok ? "ok" : "bad") + '">' + esc(row.outcome) + "</span></td>"
+        + '<td class="mono">' + esc(ok ? row.id : "—") + "</td>"
+        + "<td>" + (ok
+          ? 'valid until ' + time(row.expires_at) + ' · <a href="/v1/verification/document?id=' + encodeURIComponent(row.id) + '">evidence</a>'
+          : '<span style="color:var(--bad)">' + esc(row.failure) + "</span>") + "</td></tr>";
+    }).join("") + "</tbody></table>";
+}
+
+async function refresh() {
+  try {
+    const response = await fetch("/v1/verification", { cache: "no-store" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    const data = await response.json();
+    document.getElementById("gateway").textContent = data.gateway ? "Gateway " + data.gateway : "";
+    document.getElementById("refreshed").textContent = "Updated " + new Date().toLocaleTimeString();
+    renderHero(data);
+    renderStats(data);
+    renderChecks(data);
+    renderEvidence(data);
+    renderRequests(data);
+    renderHistory(data);
+  } catch (error) {
+    document.getElementById("refreshed").textContent = "Cannot reach the proxy: " + error.message;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
