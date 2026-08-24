@@ -185,7 +185,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if isEventStream(response.Header.Get("Content-Type")) {
 		record.Streaming = true
-		h.forwardEventStream(w, response, &record)
+		h.forwardEventStream(r.Context(), w, response, &record)
 		return
 	}
 	h.forwardNormal(w, response, &record)
@@ -228,7 +228,7 @@ func (h *Handler) forwardNormal(w http.ResponseWriter, response *http.Response, 
 	}
 }
 
-func (h *Handler) forwardEventStream(w http.ResponseWriter, response *http.Response, record *ledger.Request) {
+func (h *Handler) forwardEventStream(ctx context.Context, w http.ResponseWriter, response *http.Response, record *ledger.Request) {
 	copyResponseHeaders(w.Header(), response.Header)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
@@ -254,18 +254,44 @@ func (h *Handler) forwardEventStream(w http.ResponseWriter, response *http.Respo
 		if readErr == nil {
 			continue
 		}
-		if errors.Is(readErr, io.EOF) {
-			tracker.Finish()
-			if tracker.done {
-				record.Outcome = ledger.OutcomeEncrypted
-				return
-			}
+
+		// The upstream stream is over, cleanly or not. Decide on the
+		// terminator, not on how the read ended: "data: [DONE]" IS the end of
+		// an SSE response, so once it has been delivered and flushed there is
+		// nothing further to authenticate and the exchange succeeded.
+		//
+		// This matters because a well-behaved OpenAI client closes the
+		// response body the moment it reads [DONE]. That cancels the request
+		// context, which tears down the upstream request, and the frame guard
+		// reports the half-read length prefix as "truncated EHBP response
+		// frame prefix" — a non-EOF error arriving after a complete, fully
+		// authenticated response. Treating that as a failure aborted a
+		// connection the client had already finished with and recorded every
+		// such request as failed in the verification ledger.
+		//
+		// A stream cut BEFORE the terminator still fails closed below, so the
+		// integrity property is unchanged: bytes released to the local client
+		// were always authenticated, and a response that never completed is
+		// never reported as if it had.
+		tracker.Finish()
+		if tracker.done {
+			record.Outcome = ledger.OutcomeEncrypted
+			return
+		}
+
+		switch {
+		case errors.Is(readErr, io.EOF):
 			record.Failure = "authenticated event stream ended without a terminating [DONE]"
 			h.logger.Printf("authenticated Gateway event stream ended without data: [DONE]")
-			panic(http.ErrAbortHandler)
+		case ctx.Err() != nil:
+			// The local client went away before the response completed. That
+			// is not the Gateway failing, and saying so would send an operator
+			// looking in the wrong place.
+			record.Failure = "local client disconnected mid-stream"
+		default:
+			record.Failure = "authenticated event stream failed mid-response"
+			h.logger.Printf("authenticated Gateway event stream failed: %v", readErr)
 		}
-		record.Failure = "authenticated event stream failed mid-response"
-		h.logger.Printf("authenticated Gateway event stream failed: %v", readErr)
 		panic(http.ErrAbortHandler)
 	}
 }
