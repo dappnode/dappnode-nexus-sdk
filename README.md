@@ -127,11 +127,35 @@ curl http://127.0.0.1:3301/v1/chat/completions \
   -d '{"model":"MODEL","messages":[{"role":"user","content":"hello"}]}'
 ```
 
+`GET /v1/models` returns the Gateway's model catalog, so a client that
+enumerates models against its base URL works without extra configuration.
+
 Both ordinary JSON responses and `stream: true` SSE responses are supported.
 The proxy never automatically retries an inference request. After an explicit
 stale-key failure it discards the cached key; a new caller request triggers new
 attestation. Deployments therefore require one active enclave per Gateway
 origin or key-affine routing.
+
+## Model catalog
+
+`GET /v1/models` passes the Gateway's public model catalog through unchanged.
+This is **not** a confidential path, and it is the one route on this proxy that
+is not covered by the guarantee above:
+
+- The catalog is public, unauthenticated, cacheable data. It carries no prompt,
+  no completion and no credential, so there is nothing to encrypt.
+- It is fetched over ordinary TLS, not over EHBP, and the Gateway serves it at
+  the standard `/v1/models` path rather than the confidential endpoint.
+- The caller's `Authorization` header is **not** forwarded. The Gateway ignores
+  it, and forwarding it would put a Nexus API key on a path that terminates at
+  Cloudflare for no benefit.
+- The response is released only when it is one complete JSON object, so an HTML
+  error page from an intermediary cannot reach a client expecting JSON.
+- These requests are not recorded in the verification ledger. Counting them
+  would overstate how many bodies actually crossed the attested channel.
+
+Pass `--model-catalog=false` to remove the route entirely and leave the
+confidential inference endpoint as the only upstream this proxy talks to.
 
 ## Security boundary
 

@@ -43,3 +43,9 @@ func ReadAllLimited(reader io.Reader, limit int64) ([]byte, error) {
 	}
 	return data, nil
 }
+
+// IsJSONObject reports whether data is exactly one complete JSON object.
+// data must already be trimmed of surrounding whitespace.
+func IsJSONObject(data []byte) bool {
+	return len(data) >= 2 && data[0] == '{' && data[len(data)-1] == '}' && json.Valid(data)
+}
