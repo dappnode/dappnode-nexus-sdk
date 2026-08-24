@@ -15,10 +15,12 @@ func validPolicy() Policy {
 		ManifestSchemaVersion: ManifestSchemaVersion,
 		Workload:              GatewayWorkload,
 		Profile:               GatewayProfile,
-		SourceRevision:        strings.Repeat("a", 40),
-		PCR0:                  measurement,
-		PCR1:                  measurement,
-		PCR2:                  measurement,
+		Releases: []Release{{
+			SourceRevision: strings.Repeat("a", 40),
+			PCR0:           measurement,
+			PCR1:           measurement,
+			PCR2:           measurement,
+		}},
 		E2EE: E2EEPolicy{
 			Protocol:          EHBPProtocol,
 			Suite:             EHBPSuite,
@@ -44,11 +46,14 @@ func TestLoadPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPolicy() error = %v", err)
 	}
-	if loaded.SourceRevision != policy.SourceRevision {
-		t.Fatalf("source revision = %q, want %q", loaded.SourceRevision, policy.SourceRevision)
+	if len(loaded.Releases) != 1 {
+		t.Fatalf("release count = %d, want 1", len(loaded.Releases))
 	}
-	if len(loaded.expectedPCRs()) != 3 {
-		t.Fatalf("expected PCR count = %d, want 3", len(loaded.expectedPCRs()))
+	if loaded.Releases[0].SourceRevision != policy.Releases[0].SourceRevision {
+		t.Fatalf("source revision = %q, want %q", loaded.Releases[0].SourceRevision, policy.Releases[0].SourceRevision)
+	}
+	if len(loaded.Releases[0].expectedPCRs()) != 3 {
+		t.Fatalf("expected PCR count = %d, want 3", len(loaded.Releases[0].expectedPCRs()))
 	}
 }
 
@@ -62,10 +67,27 @@ func TestPolicyRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 		{name: "manifest schema", mutate: func(p *Policy) { p.ManifestSchemaVersion-- }, want: "manifest_schema_version"},
 		{name: "workload", mutate: func(p *Policy) { p.Workload = "other" }, want: "workload"},
 		{name: "profile", mutate: func(p *Policy) { p.Profile = "other" }, want: "profile"},
-		{name: "short revision", mutate: func(p *Policy) { p.SourceRevision = "abc" }, want: "source_revision"},
-		{name: "uppercase revision", mutate: func(p *Policy) { p.SourceRevision = strings.Repeat("A", 40) }, want: "source_revision"},
-		{name: "zero PCR", mutate: func(p *Policy) { p.PCR0 = strings.Repeat("0", pcrBytes*2) }, want: "all zero"},
-		{name: "uppercase PCR", mutate: func(p *Policy) { p.PCR1 = strings.ToUpper(p.PCR1) }, want: "lowercase"},
+		{name: "short revision", mutate: func(p *Policy) { p.Releases[0].SourceRevision = "abc" }, want: "source_revision"},
+		{name: "uppercase revision", mutate: func(p *Policy) { p.Releases[0].SourceRevision = strings.Repeat("A", 40) }, want: "source_revision"},
+		{name: "zero PCR", mutate: func(p *Policy) { p.Releases[0].PCR0 = strings.Repeat("0", pcrBytes*2) }, want: "all zero"},
+		{name: "uppercase PCR", mutate: func(p *Policy) { p.Releases[0].PCR1 = strings.ToUpper(p.Releases[0].PCR1) }, want: "lowercase"},
+		{name: "no releases", mutate: func(p *Policy) { p.Releases = nil }, want: "at least one"},
+		{
+			name: "too many releases",
+			mutate: func(p *Policy) {
+				for len(p.Releases) <= maxPolicyReleases {
+					extra := p.Releases[0]
+					extra.SourceRevision = strings.Repeat(string(rune('a'+len(p.Releases))), 40)
+					p.Releases = append(p.Releases, extra)
+				}
+			},
+			want: "more than",
+		},
+		{
+			name:   "duplicate release",
+			mutate: func(p *Policy) { p.Releases = append(p.Releases, p.Releases[0]) },
+			want:   "more than once",
+		},
 		{name: "wrong endpoint", mutate: func(p *Policy) { p.E2EE.Endpoint = "/other" }, want: "e2ee"},
 		{name: "unencrypted response", mutate: func(p *Policy) { p.E2EE.ResponseEncrypted = false }, want: "e2ee"},
 	}

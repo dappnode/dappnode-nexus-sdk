@@ -27,14 +27,18 @@ being verified.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "manifest_schema_version": 4,
   "workload": "dappnode-nexus-gateway",
   "profile": "nexus-gateway-v2",
-  "source_revision": "REPLACE_WITH_40_LOWERCASE_HEX_CHARACTERS",
-  "pcr0": "REPLACE_WITH_96_LOWERCASE_HEX_CHARACTERS",
-  "pcr1": "REPLACE_WITH_96_LOWERCASE_HEX_CHARACTERS",
-  "pcr2": "REPLACE_WITH_96_LOWERCASE_HEX_CHARACTERS",
+  "releases": [
+    {
+      "source_revision": "REPLACE_WITH_40_LOWERCASE_HEX_CHARACTERS",
+      "pcr0": "REPLACE_WITH_96_LOWERCASE_HEX_CHARACTERS",
+      "pcr1": "REPLACE_WITH_96_LOWERCASE_HEX_CHARACTERS",
+      "pcr2": "REPLACE_WITH_96_LOWERCASE_HEX_CHARACTERS"
+    }
+  ],
   "e2ee": {
     "protocol": "ehbp-v1",
     "suite": "DHKEM-X25519-HKDF-SHA256/HKDF-SHA256/AES-256-GCM",
@@ -47,6 +51,22 @@ being verified.
 
 The parser rejects unknown fields, all-zero debug PCRs, non-canonical values,
 and any unsupported E2EE contract.
+
+### Pinning more than one release
+
+`releases` accepts up to four entries so a Gateway can be rolled out without
+every client failing closed in the interval before it is updated. Publish a
+policy listing both the outgoing and the incoming release, let clients pick it
+up, deploy the new Gateway, then publish a policy listing only the new release.
+
+Each entry is matched as a whole. The verifier selects the single entry whose
+`source_revision` the signed manifest claims, and accepts only that entry's
+measurements; it never accepts a measurement from one entry alongside a
+revision from another. Evidence naming a revision that is not pinned is
+rejected outright.
+
+Keep the list short. Every entry is a build you are asserting is trustworthy,
+so remove a release as soon as nothing is running it.
 
 ## Run
 

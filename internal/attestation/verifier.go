@@ -131,19 +131,17 @@ func NewVerifier(endpoint string, policy *Policy, client *http.Client) (*Verifie
 		return nil, errors.New("attestation HTTP client must reject redirects")
 	}
 
-	pcrs := policyCopy.expectedPCRs()
-	rules := make([]awsnitroverifier.PCRRule, 0, 3)
-	for _, index := range []uint{0, 1, 2} {
-		rules = append(rules, awsnitroverifier.PCRRule{Index: index, Value: pcrs[index]})
-	}
-
 	return &Verifier{
 		endpoint:   endpoint,
 		policy:     policyCopy,
 		httpClient: client,
+		// No PCRRules: the policy may pin more than one release, and a rule
+		// list cannot express "any one of these complete measurement sets".
+		// validate() compares all three PCRs in constant time against the one
+		// release matched by the attested source revision, which is the same
+		// check this option would perform.
 		document: awsnitroverifier.NewVerifier(awsnitroverifier.AWSNitroVerifierOptions{
 			SkipTimestampCheck: false,
-			PCRRules:           rules,
 		}),
 		random:        rand.Reader,
 		now:           time.Now,
@@ -260,7 +258,8 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 	if subtle.ConstantTimeCompare(fetched.userData, manifestDigest[:]) != 1 {
 		return nil, errors.New("response user_data does not match SHA-384(manifest)")
 	}
-	if err := v.validateManifest(fetched.manifest); err != nil {
+	release, err := v.validateManifest(fetched.manifest)
+	if err != nil {
 		return nil, err
 	}
 
@@ -303,14 +302,14 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 		return nil, errors.New("attestation timestamp is stale")
 	}
 
-	expectedPCRs := v.policy.expectedPCRs()
+	expectedPCRs := release.expectedPCRs()
 	for _, index := range []uint{0, 1, 2} {
 		actual, present := result.Document.PCRs[index]
 		if !present || len(actual) != pcrBytes || allZero(actual) {
 			return nil, fmt.Errorf("attestation PCR%d is missing, malformed, or unsafe", index)
 		}
 		if subtle.ConstantTimeCompare(actual, expectedPCRs[index]) != 1 {
-			return nil, fmt.Errorf("attestation PCR%d does not match the pinned measurement", index)
+			return nil, fmt.Errorf("attestation PCR%d does not match the pinned measurement for release %s", index, release.SourceRevision)
 		}
 	}
 
@@ -330,7 +329,7 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 			ModuleID:        result.Document.ModuleID,
 			PCRs:            retainedPCRs,
 			RootFingerprint: result.RootFingerprint,
-			SourceRevision:  v.policy.SourceRevision,
+			SourceRevision:  release.SourceRevision,
 			Workload:        v.policy.Workload,
 			Profile:         v.policy.Profile,
 			E2EE:            v.policy.E2EE,
@@ -341,34 +340,39 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 // MaximumAge is the attestation validity window this verifier enforces.
 func (v *Verifier) MaximumAge() time.Duration { return v.maxAge }
 
-func (v *Verifier) validateManifest(raw json.RawMessage) error {
+// validateManifest checks the claims every pinned release shares, then selects
+// the single release the evidence claims to be. The manifest is bound to the
+// signed document through user_data, so the selected release cannot be chosen
+// by an attacker independently of the measurements that are checked against it.
+func (v *Verifier) validateManifest(raw json.RawMessage) (*Release, error) {
 	var manifest manifestClaims
 	if err := json.Unmarshal(raw, &manifest); err != nil {
-		return fmt.Errorf("decode attested manifest: %w", err)
+		return nil, fmt.Errorf("decode attested manifest: %w", err)
 	}
 	if manifest.SchemaVersion != v.policy.ManifestSchemaVersion {
-		return errors.New("attested manifest schema_version does not match the trust policy")
+		return nil, errors.New("attested manifest schema_version does not match the trust policy")
 	}
 	if manifest.Workload != v.policy.Workload {
-		return errors.New("attested workload does not match the trust policy")
+		return nil, errors.New("attested workload does not match the trust policy")
 	}
 	if manifest.Profile != v.policy.Profile {
-		return errors.New("attested profile does not match the trust policy")
-	}
-	if manifest.SourceRevision != v.policy.SourceRevision {
-		return errors.New("attested source_revision does not match the trust policy")
+		return nil, errors.New("attested profile does not match the trust policy")
 	}
 	if len(manifest.Ingress.E2EE) == 0 || bytes.Equal(manifest.Ingress.E2EE, []byte("null")) {
-		return errors.New("attested manifest is missing ingress.e2ee")
+		return nil, errors.New("attested manifest is missing ingress.e2ee")
 	}
 	var e2ee E2EEPolicy
 	if err := jsonutil.DecodeStrict(manifest.Ingress.E2EE, &e2ee); err != nil {
-		return fmt.Errorf("decode attested ingress.e2ee: %w", err)
+		return nil, fmt.Errorf("decode attested ingress.e2ee: %w", err)
 	}
 	if e2ee != v.policy.E2EE {
-		return errors.New("attested ingress.e2ee does not match the trust policy")
+		return nil, errors.New("attested ingress.e2ee does not match the trust policy")
 	}
-	return nil
+	release, pinned := v.policy.releaseFor(manifest.SourceRevision)
+	if !pinned {
+		return nil, errors.New("attested source_revision is not a pinned Gateway release")
+	}
+	return release, nil
 }
 
 func decodeCanonicalBase64(encoded string) ([]byte, error) {

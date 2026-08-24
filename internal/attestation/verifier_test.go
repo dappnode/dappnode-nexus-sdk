@@ -252,7 +252,7 @@ func newVerificationFixture(t *testing.T) *verificationFixture {
 		"schema_version":  policy.ManifestSchemaVersion,
 		"profile":         policy.Profile,
 		"workload":        policy.Workload,
-		"source_revision": policy.SourceRevision,
+		"source_revision": policy.Releases[0].SourceRevision,
 		"ingress": map[string]any{
 			"gateway_vsock_port": float64(8080),
 			"tls_in_enclave":     false,
@@ -273,7 +273,7 @@ func newVerificationFixture(t *testing.T) *verificationFixture {
 	nonce := bytes.Repeat([]byte{0x42}, nonceBytes)
 	publicKey := bytes.Repeat([]byte{0x24}, hpkePublicKeyBytes)
 	now := time.Date(2026, time.August, 17, 12, 0, 0, 0, time.UTC)
-	pcrs := policy.expectedPCRs()
+	pcrs := policy.Releases[0].expectedPCRs()
 	result := &awsnitroverifier.ValidationResult{
 		Valid:           true,
 		ChainTrusted:    true,
@@ -328,4 +328,100 @@ func (f *verificationFixture) replaceManifest(t *testing.T, mutate func(map[stri
 	f.fetched.manifest = encoded
 	f.fetched.userData = append([]byte(nil), digest[:]...)
 	f.result.UserData = append([]byte(nil), digest[:]...)
+}
+
+// secondRelease is a distinct pinned build: different revision, different
+// measurements. Policies carry two entries during a Gateway rollout.
+func secondRelease() Release {
+	return Release{
+		SourceRevision: strings.Repeat("b", 40),
+		PCR0:           strings.Repeat("cd", pcrBytes),
+		PCR1:           strings.Repeat("ce", pcrBytes),
+		PCR2:           strings.Repeat("cf", pcrBytes),
+	}
+}
+
+// pinTwoReleases adds a second pinned release and revalidates, so the fixture
+// still describes the first one.
+func (f *verificationFixture) pinTwoReleases(t *testing.T) Release {
+	t.Helper()
+	extra := secondRelease()
+	f.verifier.policy.Releases = append(f.verifier.policy.Releases, extra)
+	if err := f.verifier.policy.validate(); err != nil {
+		t.Fatal(err)
+	}
+	return f.verifier.policy.Releases[1]
+}
+
+func TestPolicyAcceptsEitherPinnedRelease(t *testing.T) {
+	// The release already described by the fixture stays acceptable once a
+	// second one is pinned: adding the incoming build must not break clients
+	// still talking to the outgoing one.
+	fixture := newVerificationFixture(t)
+	fixture.pinTwoReleases(t)
+	evidence, err := fixture.verifier.validate(fixture.fetched, fixture.nonce, fixture.now)
+	if err != nil {
+		t.Fatalf("validate() error = %v, want the outgoing release to stay accepted", err)
+	}
+	if evidence.Proof.SourceRevision != strings.Repeat("a", 40) {
+		t.Fatalf("proof revision = %q, want the matched release", evidence.Proof.SourceRevision)
+	}
+
+	// And the newly pinned release is accepted on its own terms.
+	second := fixture.verifier.policy.Releases[1]
+	fixture.replaceManifest(t, func(manifest map[string]any) {
+		manifest["source_revision"] = second.SourceRevision
+	})
+	expected := second.expectedPCRs()
+	for index := range uint(3) {
+		fixture.result.Document.PCRs[index] = append([]byte(nil), expected[index]...)
+	}
+	evidence, err = fixture.verifier.validate(fixture.fetched, fixture.nonce, fixture.now)
+	if err != nil {
+		t.Fatalf("validate() error = %v, want the incoming release accepted", err)
+	}
+	if evidence.Proof.SourceRevision != second.SourceRevision {
+		t.Fatalf("proof revision = %q, want %q", evidence.Proof.SourceRevision, second.SourceRevision)
+	}
+}
+
+// TestMeasurementsAreNotMixedAcrossReleases is the load-bearing test for a
+// multi-release policy: each release must be satisfied as a whole. Evidence
+// naming one release while carrying another's measurements must fail, or
+// pinning two releases would silently widen what counts as trusted to every
+// combination of their measurements.
+func TestMeasurementsAreNotMixedAcrossReleases(t *testing.T) {
+	fixture := newVerificationFixture(t)
+	second := fixture.pinTwoReleases(t)
+
+	// Claim the second release, but keep the first release's measurements.
+	fixture.replaceManifest(t, func(manifest map[string]any) {
+		manifest["source_revision"] = second.SourceRevision
+	})
+	_, err := fixture.verifier.validate(fixture.fetched, fixture.nonce, fixture.now)
+	if err == nil || !strings.Contains(err.Error(), "PCR0") {
+		t.Fatalf("validate() error = %v, want a PCR mismatch for the claimed release", err)
+	}
+
+	// The mirror image: keep the first release's revision, swap in the
+	// second release's PCR0.
+	fixture = newVerificationFixture(t)
+	second = fixture.pinTwoReleases(t)
+	fixture.result.Document.PCRs[0] = append([]byte(nil), second.expectedPCRs()[0]...)
+	_, err = fixture.verifier.validate(fixture.fetched, fixture.nonce, fixture.now)
+	if err == nil || !strings.Contains(err.Error(), "PCR0") {
+		t.Fatalf("validate() error = %v, want a PCR mismatch", err)
+	}
+}
+
+func TestUnpinnedReleaseIsRejected(t *testing.T) {
+	fixture := newVerificationFixture(t)
+	fixture.pinTwoReleases(t)
+	fixture.replaceManifest(t, func(manifest map[string]any) {
+		manifest["source_revision"] = strings.Repeat("f", 40)
+	})
+	_, err := fixture.verifier.validate(fixture.fetched, fixture.nonce, fixture.now)
+	if err == nil || !strings.Contains(err.Error(), "not a pinned Gateway release") {
+		t.Fatalf("validate() error = %v, want an unpinned-release rejection", err)
+	}
 }
