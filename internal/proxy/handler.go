@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/dappnode/dappnode-nexus-sdk/internal/catalog"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/jsonutil"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/ledger"
 )
@@ -24,6 +25,7 @@ import (
 const (
 	LocalChatEndpoint   = "/v1/chat/completions"
 	LocalHealthEndpoint = "/healthz"
+	LocalModelsEndpoint = catalog.ModelsEndpoint
 
 	LocalVerificationUI       = "/verification"
 	LocalVerificationAPI      = "/v1/verification"
@@ -33,7 +35,18 @@ const (
 	maxRequestBytes       = 10 << 20
 	maxNormalResponse     = 64 << 20
 	maxSSELineTracking    = 1 << 20
+
+	// catalogTimeout bounds the plain-TLS catalog fetch so a slow Gateway
+	// cannot pin a local client's model picker open.
+	catalogTimeout = 10 * time.Second
 )
+
+// catalogFetcher reads the Gateway's public model catalog. It is a separate
+// interface from sender because the catalog is fetched over ordinary TLS with
+// no credential, not over the attested EHBP channel.
+type catalogFetcher interface {
+	Fetch(context.Context) (int, []byte, error)
+}
 
 type sender interface {
 	// Do returns the response and the identifier of the attested key the
@@ -58,6 +71,7 @@ type Handler struct {
 
 	ledger        *ledger.Ledger
 	gatewayOrigin string
+	catalog       catalogFetcher
 }
 
 func NewHandler(upstream sender, logger *log.Logger) (*Handler, error) {
@@ -85,6 +99,14 @@ func (h *Handler) WithVerification(record *ledger.Ledger, gatewayOrigin string) 
 	return h
 }
 
+// WithModelCatalog serves GET /v1/models by passing the Gateway's public
+// model catalog through unchanged. Without it that path 404s, and the proxy
+// exposes nothing but the confidential inference endpoint.
+func (h *Handler) WithModelCatalog(source catalogFetcher) *Handler {
+	h.catalog = source
+	return h
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if r.URL.Path == LocalHealthEndpoint {
@@ -100,6 +122,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case LocalVerificationDocument:
 		h.serveVerificationDocument(w, r)
+		return
+	case LocalModelsEndpoint:
+		h.serveModels(w, r)
 		return
 	}
 	if r.URL.Path != LocalChatEndpoint {
@@ -123,7 +148,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requestBody = bytes.TrimSpace(requestBody)
-	if len(requestBody) < 2 || requestBody[0] != '{' || requestBody[len(requestBody)-1] != '}' || !json.Valid(requestBody) {
+	if !jsonutil.IsJSONObject(requestBody) {
 		writeOpenAIError(w, http.StatusBadRequest, "request body must be one JSON object", "invalid_request_error")
 		return
 	}
@@ -202,6 +227,38 @@ func (h *Handler) serveHealth(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, "{\"status\":\"ok\"}\n")
 }
 
+// serveModels passes the Gateway's public model catalog through so the local
+// proxy is a drop-in OpenAI base URL. The catalog carries no prompt or
+// completion content, so this request is not encrypted, not attested and not
+// recorded in the verification ledger — recording it there would inflate the
+// count of bodies that actually crossed the confidential channel.
+func (h *Handler) serveModels(w http.ResponseWriter, r *http.Request) {
+	if h.catalog == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		writeOpenAIError(w, http.StatusMethodNotAllowed, "method must be GET", "invalid_request_error")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), catalogTimeout)
+	defer cancel()
+	status, body, err := h.catalog.Fetch(ctx)
+	if err != nil {
+		h.logger.Printf("fetch Gateway model catalog: %v", err)
+		writeOpenAIError(w, http.StatusBadGateway, "could not read the model catalog from the Gateway", "api_error")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(body); err != nil {
+		h.logger.Printf("write local model catalog response: %v", err)
+	}
+}
+
 func (h *Handler) forwardNormal(w http.ResponseWriter, response *http.Response, record *ledger.Request) {
 	body, err := jsonutil.ReadAllLimited(response.Body, maxNormalResponse)
 	if err != nil {
@@ -211,7 +268,7 @@ func (h *Handler) forwardNormal(w http.ResponseWriter, response *http.Response, 
 		return
 	}
 	body = bytes.TrimSpace(body)
-	if len(body) < 2 || body[0] != '{' || body[len(body)-1] != '}' || !json.Valid(body) {
+	if !jsonutil.IsJSONObject(body) {
 		record.Failure = "authenticated response was not one complete JSON object"
 		h.logger.Printf("authenticated Gateway response was not one complete JSON object")
 		writeOpenAIError(w, http.StatusBadGateway, "confidential Gateway returned an invalid response", "api_error")

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/dappnode/dappnode-nexus-sdk/internal/attestation"
+	"github.com/dappnode/dappnode-nexus-sdk/internal/catalog"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/confidential"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/ledger"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/proxy"
@@ -39,6 +40,7 @@ type config struct {
 	listenScope        string
 	attestationTimeout time.Duration
 	verificationUI     bool
+	modelCatalog       bool
 }
 
 func main() {
@@ -118,6 +120,27 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if verificationLedger != nil {
 		handler = handler.WithVerification(verificationLedger, configuration.gatewayOrigin)
 	}
+	if configuration.modelCatalog {
+		// The catalog is public, unauthenticated data, so it uses the plain
+		// transport rather than the EHBP-guarded one: GuardEHBPResponses
+		// would reject an ordinary response, and there is nothing here to
+		// encrypt.
+		catalogClient, err := catalog.NewClient(
+			configuration.gatewayOrigin+catalog.ModelsEndpoint,
+			&http.Client{
+				Transport: transport,
+				Timeout:   configuration.attestationTimeout,
+				CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+					return errors.New("redirects are not allowed")
+				},
+			},
+		)
+		if err != nil {
+			logger.Printf("configure model catalog client: %v", err)
+			return 1
+		}
+		handler = handler.WithModelCatalog(catalogClient)
+	}
 	if configuration.listenScope == listenScopeDAppNode {
 		logger.Printf("DAppNode network listener enabled on %s; do not publish this port outside the trusted DAppNode environment", configuration.listenAddress)
 	}
@@ -143,6 +166,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	logger.Printf("verified Gateway and listening on http://%s", listener.Addr())
 	if verificationLedger != nil {
 		logger.Printf("privacy verification UI at http://%s%s", listener.Addr(), proxy.LocalVerificationUI)
+	}
+	if configuration.modelCatalog {
+		logger.Printf("public model catalog at http://%s%s; it is served over ordinary TLS, not the attested channel", listener.Addr(), proxy.LocalModelsEndpoint)
 	}
 
 	signals := make(chan os.Signal, 1)
@@ -187,6 +213,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 	listenScope := flags.String("listen-scope", listenScopeLoopback, "listener scope: loopback or dappnode")
 	attestationTimeout := flags.Duration("attestation-timeout", defaultRequestTimeout, "attestation HTTP timeout")
 	verificationUI := flags.Bool("verification-ui", true, "serve the local privacy verification page and its JSON API")
+	modelCatalog := flags.Bool("model-catalog", true, "serve GET /v1/models by passing the Gateway's public model catalog through over ordinary TLS")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -213,6 +240,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 		listenScope:        *listenScope,
 		attestationTimeout: *attestationTimeout,
 		verificationUI:     *verificationUI,
+		modelCatalog:       *modelCatalog,
 	}, nil
 }
 
