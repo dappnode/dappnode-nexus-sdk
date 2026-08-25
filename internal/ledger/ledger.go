@@ -88,6 +88,9 @@ type Ledger struct {
 	rejectedTotal  uint64
 	encryptedTotal uint64
 	failedTotal    uint64
+
+	// store is nil for a memory-only ledger, which is still the default.
+	store *store
 }
 
 func New() *Ledger {
@@ -123,6 +126,7 @@ func (l *Ledger) RecordVerified(record Attestation, document []byte, manifest js
 	}
 	l.verifiedTotal++
 	l.attestations = appendCapped(l.attestations, record, maxAttestations)
+	l.markDirty()
 }
 
 // RecordRejected stores a verification the client refused to trust. A rejected
@@ -140,6 +144,7 @@ func (l *Ledger) RecordRejected(failure string) {
 		VerifiedAt: l.now().UTC(),
 		Failure:    failure,
 	}, maxAttestations)
+	l.markDirty()
 }
 
 // RecordRequest stores one request's metadata.
@@ -155,6 +160,7 @@ func (l *Ledger) RecordRequest(record Request) {
 		l.failedTotal++
 	}
 	l.requests = appendCapped(l.requests, record, maxRequests)
+	l.markDirty()
 }
 
 // Snapshot is the JSON view served to the verification UI.

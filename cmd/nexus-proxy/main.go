@@ -29,6 +29,7 @@ const (
 	defaultListenAddress  = "127.0.0.1:3301"
 	defaultRequestTimeout = 15 * time.Second
 	shutdownTimeout       = 10 * time.Second
+	stateFlushInterval    = 5 * time.Second
 	listenScopeLoopback   = "loopback"
 	listenScopeDAppNode   = "dappnode"
 )
@@ -41,6 +42,7 @@ type config struct {
 	attestationTimeout time.Duration
 	verificationUI     bool
 	modelCatalog       bool
+	stateFile          string
 }
 
 func main() {
@@ -100,7 +102,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	var verificationLedger *ledger.Ledger
 	if configuration.verificationUI {
-		verificationLedger = ledger.New()
+		if configuration.stateFile != "" {
+			verificationLedger, err = ledger.Open(configuration.stateFile)
+			if err != nil {
+				logger.Printf("open verification state file: %v", err)
+				return 1
+			}
+		} else {
+			verificationLedger = ledger.New()
+		}
 		confidentialClient = confidentialClient.WithLedger(verificationLedger)
 	}
 
@@ -171,6 +181,28 @@ func run(args []string, stdout, stderr io.Writer) int {
 		logger.Printf("public model catalog at http://%s%s; it is served over ordinary TLS, not the attested channel", listener.Addr(), proxy.LocalModelsEndpoint)
 	}
 
+	// Verification history is written behind the request path, never on it: a
+	// slow disk must not delay an inference response. Everything written is
+	// evidence and metadata, never a prompt or a completion.
+	stopFlushing := make(chan struct{})
+	if configuration.stateFile != "" {
+		logger.Printf("persisting verification history to %s", configuration.stateFile)
+		go func() {
+			ticker := time.NewTicker(stateFlushInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if err := verificationLedger.Flush(); err != nil {
+						logger.Printf("persist verification history: %v", err)
+					}
+				case <-stopFlushing:
+					return
+				}
+			}
+		}()
+	}
+
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -184,6 +216,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case received := <-signals:
 		logger.Printf("received %s; shutting down", received)
+	}
+
+	close(stopFlushing)
+	if err := verificationLedger.Flush(); err != nil {
+		logger.Printf("persist verification history on shutdown: %v", err)
 	}
 
 	shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -214,6 +251,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 	attestationTimeout := flags.Duration("attestation-timeout", defaultRequestTimeout, "attestation HTTP timeout")
 	verificationUI := flags.Bool("verification-ui", true, "serve the local privacy verification page and its JSON API")
 	modelCatalog := flags.Bool("model-catalog", true, "serve GET /v1/models by passing the Gateway's public model catalog through over ordinary TLS")
+	stateFile := flags.String("state-file", "", "persist verification history to this file; empty keeps it in memory only")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -241,6 +279,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 		attestationTimeout: *attestationTimeout,
 		verificationUI:     *verificationUI,
 		modelCatalog:       *modelCatalog,
+		stateFile:          *stateFile,
 	}, nil
 }
 
