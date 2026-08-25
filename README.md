@@ -114,8 +114,17 @@ back for independent checking.
 The ledger behind it holds verification evidence, which is public by
 construction, plus per request identifiers, timing and sizes. It never receives
 prompt or completion content, and nothing is written to disk: history is kept in
-memory and starts empty after a restart. Pass `--verification-ui=false` to
+memory unless `--state-file` is given. Pass `--verification-ui=false` to
 remove the page and its API entirely.
+
+`--state-file PATH` persists verification history so it survives a restart.
+Only evidence and metadata are written — the signed attestation documents, the
+manifests they commit to, and per request identifiers, timing, sizes and
+outcome. The on-disk format has no field that could hold a prompt or a
+completion. The file is written `0600`, replaced atomically, and flushed off
+the request path; a missing or unreadable file starts an empty history rather
+than blocking startup. Without the flag the ledger stays memory-only, exactly
+as before.
 
 Point an OpenAI-compatible client at `http://127.0.0.1:3301/v1` and keep using
 its normal API-key setting. For example:
