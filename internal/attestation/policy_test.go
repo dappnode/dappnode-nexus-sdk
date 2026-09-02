@@ -57,6 +57,26 @@ func TestLoadPolicy(t *testing.T) {
 	}
 }
 
+func TestParsePolicy(t *testing.T) {
+	encoded, err := json.Marshal(validPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParsePolicy(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.Releases) != 1 || len(parsed.Releases[0].expectedPCRs()) != 3 {
+		t.Fatalf("parsed policy = %+v", parsed)
+	}
+	if _, err := ParsePolicy(nil); err == nil {
+		t.Fatal("ParsePolicy(nil) succeeded")
+	}
+	if _, err := ParsePolicy(make([]byte, maxPolicyBytes+1)); err == nil {
+		t.Fatal("ParsePolicy accepted an oversized policy")
+	}
+}
+
 func TestPolicyRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 	tests := []struct {
 		name   string

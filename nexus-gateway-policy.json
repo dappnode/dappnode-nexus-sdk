@@ -1,0 +1,27 @@
+{
+  "schema_version": 2,
+  "manifest_schema_version": 4,
+  "workload": "dappnode-nexus-gateway",
+  "profile": "nexus-gateway-v2",
+  "releases": [
+    {
+      "source_revision": "7207defa97d8e5256ed7ff1ce925a4903752946d",
+      "pcr0": "a61dc828dffcba5cc6a6dc68b1a3af646b9d8db047d84c3348e52fa0e45cb01675cd01ad1931ed447620b5995e8d7f71",
+      "pcr1": "4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493",
+      "pcr2": "b676515e4460e61be1f860cdb05a5852571b2c73320eff1228b70184422d3d44612c6ee405ea3511623be4a2c600b9fa"
+    },
+    {
+      "source_revision": "bda15a3549b7a9fbb37004281852079e9013f73b",
+      "pcr0": "f9dc7325b6bfc916a1c29cbd9ba8d802d9c8270dd33db60671834a47c40451658633b573aac718ed8896694611b3ac21",
+      "pcr1": "4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493",
+      "pcr2": "9f60b8d4aa783dd8ecb7329a1fd30f597090e76615f4b11c7097fbf85a025920a65623efad80d56c410334dbabdc343a"
+    }
+  ],
+  "e2ee": {
+    "protocol": "ehbp-v1",
+    "suite": "DHKEM-X25519-HKDF-SHA256/HKDF-SHA256/AES-256-GCM",
+    "endpoint": "/v1/confidential/chat/completions",
+    "request_encrypted": true,
+    "response_encrypted": true
+  }
+}

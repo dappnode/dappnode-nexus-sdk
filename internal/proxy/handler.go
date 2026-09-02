@@ -69,9 +69,10 @@ type Handler struct {
 	now    func() time.Time
 	newID  func() (string, error)
 
-	ledger        *ledger.Ledger
-	gatewayOrigin string
-	catalog       catalogFetcher
+	ledger         *ledger.Ledger
+	gatewayOrigin  string
+	verificationUI bool
+	catalog        catalogFetcher
 }
 
 func NewHandler(upstream sender, logger *log.Logger) (*Handler, error) {
@@ -94,8 +95,16 @@ func NewHandler(upstream sender, logger *log.Logger) (*Handler, error) {
 // stored. gatewayOrigin is shown in the UI so an operator can see which
 // Gateway the evidence belongs to.
 func (h *Handler) WithVerification(record *ledger.Ledger, gatewayOrigin string) *Handler {
-	h.ledger = record
+	h.WithLedger(record)
 	h.gatewayOrigin = gatewayOrigin
+	h.verificationUI = true
+	return h
+}
+
+// WithLedger records request metadata without exposing the verification HTTP
+// routes. WithVerification enables both recording and those routes.
+func (h *Handler) WithLedger(record *ledger.Ledger) *Handler {
+	h.ledger = record
 	return h
 }
 

@@ -68,7 +68,7 @@ func (h *Handler) serveVerificationDocument(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) allowVerification(w http.ResponseWriter, r *http.Request) bool {
-	if h.ledger == nil {
+	if !h.verificationUI || h.ledger == nil {
 		http.NotFound(w, r)
 		return false
 	}

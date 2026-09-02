@@ -23,6 +23,16 @@ func (v *fixedEvidenceVerifier) Verify(context.Context) (*attestation.Evidence, 
 	return &attestation.Evidence{PublicKey: v.key, ExpiresAt: time.Now().Add(time.Minute)}, nil
 }
 
+type countingEvidenceVerifier struct {
+	key   []byte
+	calls int
+}
+
+func (v *countingEvidenceVerifier) Verify(context.Context) (*attestation.Evidence, error) {
+	v.calls++
+	return &attestation.Evidence{PublicKey: v.key, ExpiresAt: time.Now().Add(time.Minute)}, nil
+}
+
 type inspectingRoundTripper struct {
 	t      *testing.T
 	calls  int
@@ -120,5 +130,41 @@ func TestNewClientRequiresRedirectPolicy(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "redirect") {
 		t.Fatalf("NewClient() error = %v, want redirect policy error", err)
+	}
+}
+
+func TestReverifyReplacesCachedSession(t *testing.T) {
+	serverIdentity, err := identity.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := &countingEvidenceVerifier{key: serverIdentity.MarshalPublicKey()}
+	client, err := NewClient(
+		"https://gateway.example/v1/confidential/chat/completions",
+		verifier,
+		&http.Client{
+			Transport: http.DefaultTransport,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return errors.New("redirects are not allowed")
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WarmUp(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.WarmUp(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if verifier.calls != 1 {
+		t.Fatalf("cached verifier calls = %d, want 1", verifier.calls)
+	}
+	if err := client.Reverify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if verifier.calls != 2 {
+		t.Fatalf("reverify calls = %d, want 2", verifier.calls)
 	}
 }

@@ -228,6 +228,21 @@ func TestVerificationSurfaceAbsentWithoutLedger(t *testing.T) {
 	}
 }
 
+func TestVerificationSurfaceAbsentWithPrivateLedger(t *testing.T) {
+	handler, err := NewHandler(&healthTestSender{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := httptest.NewServer(handler.WithLedger(ledger.New()))
+	t.Cleanup(local.Close)
+
+	for _, path := range []string{LocalVerificationUI, LocalVerificationAPI, LocalVerificationDocument} {
+		if status, _ := fetchBody(t, local.URL+path); status != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, status)
+		}
+	}
+}
+
 func TestRejectedAttestationIsRecordedAndBlocksRequests(t *testing.T) {
 	record := ledger.New()
 	record.RecordRejected("attestation PCR0 does not match the pinned measurement")
