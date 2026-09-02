@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve the Nexus Privacy Layer.
+Thanks for helping improve the DAppNode Nexus SDK.
 
 ## Development setup
 
@@ -17,7 +17,7 @@ The compiled binary is written to `bin/nexus-proxy`.
 ## Project layout
 
 - `cmd/nexus-proxy` contains the executable.
-- `internal/attestation` verifies the confidential Nexus service.
+- `internal/attestation` verifies the Nexus Gateway.
 - `internal/confidential` protects request and response bodies.
 - `internal/proxy` provides the local OpenAI-compatible API.
 - `internal/ledger` powers the local verification history.
@@ -27,6 +27,6 @@ The compiled binary is written to `bin/nexus-proxy`.
 Keep changes focused, add or update tests for behavior changes, and make sure
 `make test`, `make vet`, and `make build` pass before opening a pull request.
 
-Operational policies, release measurements, and deployment runbooks are
-maintained privately by the DAppNode team and are intentionally not part of
-this public repository.
+The policy in `nexus-gateway-policy.json` is updated only from verified Gateway
+release measurements. Deployment and release runbooks are maintained privately
+by the DAppNode team and are intentionally not part of this public repository.

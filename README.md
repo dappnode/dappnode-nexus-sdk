@@ -1,25 +1,64 @@
-# Nexus Privacy Layer
+# DAppNode Nexus SDK
 
-Private, OpenAI-compatible access to Nexus for applications running on
-DAppNode.
+A local, OpenAI-compatible client that verifies the Nexus Gateway before any
+prompt is sent.
 
-The Nexus Privacy Layer runs locally on your DAppNode. It verifies the Nexus
-confidential service before accepting traffic, then protects prompt and
-response bodies on their way to and from Nexus. Applications keep using the
-standard OpenAI API format.
+The SDK runs on your computer or server. At startup it checks a fresh
+attestation from the Nexus Gateway running in a trusted execution environment
+against a policy published by DAppNode. It accepts requests only after that
+verification succeeds, then protects prompt and response bodies between the
+local SDK and the verified Gateway.
 
-This repository contains the privacy component used by the **Nexus Local
-Proxy** DAppNode package. Most users should install the package rather than
-build this repository directly.
+You do not need a DAppNode to use it.
+
+## Install
+
+Go 1.26.8 or newer is required.
+
+```sh
+go install github.com/dappnode/dappnode-nexus-sdk/cmd/nexus-proxy@latest
+```
+
+Alternatively, build it from source:
+
+```sh
+git clone https://github.com/dappnode/dappnode-nexus-sdk.git
+cd dappnode-nexus-sdk
+make build
+```
+
+## Download the Nexus trust policy
+
+The maintained policy in this repository identifies the Nexus Gateway
+releases the SDK is allowed to trust. Download it through the DAppNode GitHub
+organization rather than from the Gateway being verified:
+
+```sh
+curl -fsSLo nexus-gateway-policy.json \
+  https://raw.githubusercontent.com/dappnode/dappnode-nexus-sdk/main/nexus-gateway-policy.json
+```
+
+Keep this file updated when DAppNode publishes support for a new Gateway
+release.
+
+## Start the SDK
+
+```sh
+nexus-proxy \
+  --gateway-url https://nexus-api-tee.dappnode.com \
+  --trust-policy ./nexus-gateway-policy.json
+```
+
+The SDK verifies the Gateway before opening its local listener. If verification
+fails, it exits without accepting prompts.
 
 ## Connect an application
 
-1. Install **Nexus Local Proxy** on your DAppNode.
-2. Create an API key at [nexus.dappnode.com](https://nexus.dappnode.com).
-3. Configure an application on the same DAppNode with:
+Create an API key at [nexus.dappnode.com](https://nexus.dappnode.com), then
+configure any OpenAI-compatible application with:
 
 ```text
-Base URL: http://nexus-local-proxy.dappnode.private:3301/v1
+Base URL: http://127.0.0.1:3301/v1
 API key:  your Nexus API key
 API:      OpenAI Chat Completions
 ```
@@ -28,7 +67,7 @@ For example:
 
 ```sh
 export NEXUS_API_KEY="your-api-key"
-export NEXUS_BASE_URL="http://nexus-local-proxy.dappnode.private:3301/v1"
+export NEXUS_BASE_URL="http://127.0.0.1:3301/v1"
 
 curl "$NEXUS_BASE_URL/chat/completions" \
   -H "Authorization: Bearer $NEXUS_API_KEY" \
@@ -36,38 +75,46 @@ curl "$NEXUS_BASE_URL/chat/completions" \
   -d '{"model":"MODEL_ID","messages":[{"role":"user","content":"Hello"}]}'
 ```
 
-Use `GET /v1/models` to find the model IDs available to your account. Both
-regular responses and streaming responses are supported.
+Use `GET /v1/models` to list available model IDs. Regular and streaming chat
+responses are supported.
 
-## Check your privacy connection
+## Verify the connection
 
-Open the local verification page after installing the package:
+Open the local verification page after starting the SDK:
 
 ```text
-http://nexus-local-proxy.dappnode.private:3301/verification
+http://127.0.0.1:3301/verification
 ```
 
-It shows whether the Nexus service passed verification and which protected
-connection handled each recent request. The page contains verification
-evidence and request metadata, never prompts or responses.
+It shows whether the Gateway passed verification and which verified connection
+handled each recent request. The page contains verification evidence and
+request metadata, never prompts or responses.
+
+## Using it on DAppNode
+
+DAppNode users can install **Nexus Local Proxy** instead of running the binary
+manually. Applications on the same DAppNode then use:
+
+```text
+http://nexus-local-proxy.dappnode.private:3301/v1
+```
 
 ## What is protected
 
-- Prompt and response bodies are encrypted between this local privacy layer
-  and the verified Nexus confidential service.
-- The service refuses to start if it cannot verify the confidential service.
-- Prompt and response content is not written to the verification history or
-  application logs.
+- The SDK verifies the Gateway before accepting prompts.
+- Prompt and response bodies are encrypted between the SDK and the verified
+  Gateway.
+- Prompt and response content is not written to verification history or logs.
 
-The DAppNode host and its internal network remain trusted. Request metadata,
-including headers, sizes, and timing, is outside the body-encryption boundary.
-The protection also does not extend beyond Nexus to a downstream model
-provider. Do not expose the local service port to the public Internet.
+The machine running the SDK remains trusted. Request metadata, including
+headers, sizes, and timing, is outside the body-encryption boundary. Protection
+also does not extend beyond Nexus to a downstream model provider. Keep the
+local listener private to your machine or trusted network.
 
-## For contributors
+## Contributing and security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow. Please
-report security issues as described in [SECURITY.md](SECURITY.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development instructions. Report
+security issues as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
