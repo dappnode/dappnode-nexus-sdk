@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,11 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/dappnode/dappnode-nexus-sdk/internal/attestation"
-	"github.com/dappnode/dappnode-nexus-sdk/internal/catalog"
-	"github.com/dappnode/dappnode-nexus-sdk/internal/confidential"
-	"github.com/dappnode/dappnode-nexus-sdk/internal/ledger"
-	"github.com/dappnode/dappnode-nexus-sdk/internal/proxy"
+	nexus "github.com/dappnode/dappnode-nexus-sdk"
 )
 
 const (
@@ -60,97 +55,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	logger := log.New(stderr, "nexus-proxy: ", log.LstdFlags|log.LUTC)
-	policy, err := attestation.LoadPolicy(configuration.trustPolicyPath)
-	if err != nil {
-		logger.Printf("load trust policy: %v", err)
-		return 1
-	}
-
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	wireClient := &http.Client{
-		Transport: confidential.GuardEHBPResponses(transport),
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return errors.New("redirects are not allowed")
-		},
-	}
-	attestationClient := &http.Client{
-		Transport: transport,
-		Timeout:   configuration.attestationTimeout,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return errors.New("redirects are not allowed")
-		},
-	}
-
-	verifier, err := attestation.NewVerifier(
-		configuration.gatewayOrigin+"/v1/attestation",
-		policy,
-		attestationClient,
-	)
-	if err != nil {
-		logger.Printf("configure attestation verifier: %v", err)
-		return 1
-	}
-	confidentialClient, err := confidential.NewClient(
-		configuration.gatewayOrigin+attestation.ConfidentialEndpoint,
-		verifier,
-		wireClient,
-	)
-	if err != nil {
-		logger.Printf("configure confidential Gateway client: %v", err)
-		return 1
-	}
-	var verificationLedger *ledger.Ledger
-	if configuration.verificationUI {
-		if configuration.stateFile != "" {
-			verificationLedger, err = ledger.Open(configuration.stateFile)
-			if err != nil {
-				logger.Printf("open verification state file: %v", err)
-				return 1
-			}
-		} else {
-			verificationLedger = ledger.New()
-		}
-		confidentialClient = confidentialClient.WithLedger(verificationLedger)
-	}
-
 	warmupContext, cancelWarmup := context.WithTimeout(context.Background(), configuration.attestationTimeout)
-	err = confidentialClient.WarmUp(warmupContext)
+	sdk, err := nexus.New(warmupContext, nexus.Config{
+		GatewayURL:            configuration.gatewayOrigin,
+		TrustPolicyFile:       configuration.trustPolicyPath,
+		AttestationTimeout:    configuration.attestationTimeout,
+		StateFile:             configuration.stateFile,
+		DisableVerificationUI: !configuration.verificationUI,
+		DisableModelCatalog:   !configuration.modelCatalog,
+		Logger:                logger,
+	})
 	cancelWarmup()
 	if err != nil {
-		logger.Printf("initial Gateway attestation failed: %v", err)
+		logger.Printf("initialize Nexus SDK: %v", err)
 		return 1
 	}
-
-	handler, err := proxy.NewHandler(confidentialClient, logger)
-	if err != nil {
-		logger.Printf("configure local proxy: %v", err)
-		return 1
-	}
-	if verificationLedger != nil {
-		handler = handler.WithVerification(verificationLedger, configuration.gatewayOrigin)
-	}
-	if configuration.modelCatalog {
-		// The catalog is public, unauthenticated data, so it uses the plain
-		// transport rather than the EHBP-guarded one: GuardEHBPResponses
-		// would reject an ordinary response, and there is nothing here to
-		// encrypt.
-		catalogClient, err := catalog.NewClient(
-			configuration.gatewayOrigin+catalog.ModelsEndpoint,
-			&http.Client{
-				Transport: transport,
-				Timeout:   configuration.attestationTimeout,
-				CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-					return errors.New("redirects are not allowed")
-				},
-			},
-		)
-		if err != nil {
-			logger.Printf("configure model catalog client: %v", err)
-			return 1
+	defer func() {
+		if err := sdk.Close(); err != nil {
+			logger.Printf("persist verification history on exit: %v", err)
 		}
-		handler = handler.WithModelCatalog(catalogClient)
-	}
+	}()
 	if configuration.listenScope == listenScopeDAppNode {
 		logger.Printf("DAppNode network listener enabled on %s; do not publish this port outside the trusted DAppNode environment", configuration.listenAddress)
 	}
@@ -162,7 +86,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	defer listener.Close()
 
 	server := &http.Server{
-		Handler:           handler,
+		Handler:           sdk.Handler(),
 		ErrorLog:          logger,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
@@ -174,11 +98,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		serverErrors <- server.Serve(listener)
 	}()
 	logger.Printf("verified Gateway and listening on http://%s", listener.Addr())
-	if verificationLedger != nil {
-		logger.Printf("privacy verification UI at http://%s%s", listener.Addr(), proxy.LocalVerificationUI)
+	if configuration.verificationUI {
+		logger.Printf("privacy verification UI at http://%s%s", listener.Addr(), nexus.VerificationPath)
 	}
 	if configuration.modelCatalog {
-		logger.Printf("public model catalog at http://%s%s; it is served over ordinary TLS, not the attested channel", listener.Addr(), proxy.LocalModelsEndpoint)
+		logger.Printf("public model catalog at http://%s%s; it is served over ordinary TLS, not the attested channel", listener.Addr(), nexus.ModelsPath)
 	}
 
 	// Verification history is written behind the request path, never on it: a
@@ -193,7 +117,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			for {
 				select {
 				case <-ticker.C:
-					if err := verificationLedger.Flush(); err != nil {
+					if err := sdk.Flush(); err != nil {
 						logger.Printf("persist verification history: %v", err)
 					}
 				case <-stopFlushing:
@@ -219,7 +143,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	close(stopFlushing)
-	if err := verificationLedger.Flush(); err != nil {
+	if err := sdk.Flush(); err != nil {
 		logger.Printf("persist verification history on shutdown: %v", err)
 	}
 

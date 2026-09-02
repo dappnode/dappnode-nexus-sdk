@@ -92,6 +92,16 @@ func (c *Client) WarmUp(ctx context.Context) error {
 	return err
 }
 
+// Reverify discards the cached session and requires fresh attestation evidence
+// before another session is used. Requests already holding the previous
+// verified session can finish safely.
+func (c *Client) Reverify(ctx context.Context) error {
+	c.mu.Lock()
+	c.session = nil
+	c.mu.Unlock()
+	return c.WarmUp(ctx)
+}
+
 // Do sends one JSON envelope. The Authorization header remains outside EHBP,
 // matching the existing Gateway API. No request is automatically retried. The
 // returned identifier names the attested key the body was encrypted to.

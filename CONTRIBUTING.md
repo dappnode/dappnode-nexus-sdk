@@ -16,6 +16,8 @@ The compiled binary is written to `bin/nexus-proxy`.
 
 ## Project layout
 
+- The root `nexus` package is the stable API for applications embedding the
+  SDK.
 - `cmd/nexus-proxy` contains the executable.
 - `internal/attestation` verifies the Nexus Gateway.
 - `internal/confidential` protects request and response bodies.

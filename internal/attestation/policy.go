@@ -82,6 +82,17 @@ func LoadPolicy(path string) (*Policy, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read trust policy: %w", err)
 	}
+	return ParsePolicy(data)
+}
+
+// ParsePolicy strictly parses and validates a pinned trust policy from JSON.
+func ParsePolicy(data []byte) (*Policy, error) {
+	if len(data) == 0 {
+		return nil, errors.New("trust policy JSON is required")
+	}
+	if len(data) > maxPolicyBytes {
+		return nil, fmt.Errorf("trust policy exceeds %d bytes", maxPolicyBytes)
+	}
 	var policy Policy
 	if err := jsonutil.DecodeStrict(data, &policy); err != nil {
 		return nil, fmt.Errorf("decode trust policy: %w", err)
