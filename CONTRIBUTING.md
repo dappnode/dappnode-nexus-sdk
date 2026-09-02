@@ -4,7 +4,7 @@ Thanks for helping improve the Nexus Privacy Layer.
 
 ## Development setup
 
-Install Go 1.26.4 or newer, clone the repository, and run the standard checks:
+Install Go 1.26.8 or newer, clone the repository, and run the standard checks:
 
 ```sh
 make test

@@ -1,6 +1,6 @@
 module github.com/dappnode/dappnode-nexus-sdk
 
-go 1.26.4
+go 1.26.8
 
 require (
 	github.com/anchorageoss/awsnitroverifier v0.6.0
