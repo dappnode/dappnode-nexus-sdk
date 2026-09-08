@@ -20,6 +20,7 @@ import (
 	"github.com/dappnode/dappnode-nexus-sdk/internal/confidential"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/ledger"
 	"github.com/dappnode/dappnode-nexus-sdk/internal/proxy"
+	"github.com/dappnode/dappnode-nexus-sdk/internal/release"
 )
 
 const (
@@ -40,21 +41,60 @@ const (
 	OutcomeFailed    = "failed"
 
 	defaultAttestationTimeout = 15 * time.Second
+
+	// defaultPolicyRefreshInterval keeps a running client current without
+	// making it chatty: a Gateway release is a rare, planned event, and the
+	// previous policy stays valid until the new one is fetched.
+	defaultPolicyRefreshInterval = 6 * time.Hour
 )
 
 // ErrEvidenceNotFound is returned when verification evidence is no longer in
 // the bounded local history or the supplied identifier is unknown.
 var ErrEvidenceNotFound = errors.New("verification evidence not found")
 
-// Config describes a Nexus SDK client. GatewayURL and exactly one of
-// TrustPolicyFile or TrustPolicyJSON are required. The SDK constructs its own
-// hardened network transports so callers cannot accidentally weaken redirect
-// or encrypted-frame checks.
+// TrustPolicyUpdates makes the trust policy dynamic: instead of pinning
+// measurements in a file that must be reshipped for every Gateway release, the
+// SDK reads them from the most recent Gateway releases, each signed by the
+// release workflow's Sigstore identity.
+//
+// This changes only where the measurements come from. They are still compared
+// against the enclave's attestation exactly as before, and the body-encryption
+// contract stays compiled into this client: a fetched release may say which
+// build to trust, never what protection that build owes the caller.
+type TrustPolicyUpdates struct {
+	// Repository is the Gateway repository, "owner/name". Empty uses the
+	// DAppNode Gateway repository.
+	Repository string
+
+	// Releases is how many recent releases to trust, at most 4. Empty uses 3,
+	// which covers any rollout window because a deploy only ever moves between
+	// adjacent releases.
+	Releases int
+
+	// CacheFile stores the signed material of the last successful fetch so a
+	// client that starts offline can rebuild the same policy. Every signature
+	// is re-verified on load. Empty disables caching.
+	CacheFile string
+
+	// Interval is how often the policy is refreshed. Empty uses six hours.
+	Interval time.Duration
+}
+
+// Config describes a Nexus SDK client. GatewayURL is required, along with a
+// source of trust: TrustPolicyFile, TrustPolicyJSON, or TrustPolicyUpdates.
+// The SDK constructs its own hardened network transports so callers cannot
+// accidentally weaken redirect or encrypted-frame checks.
 type Config struct {
 	GatewayURL         string
 	TrustPolicyFile    string
 	TrustPolicyJSON    []byte
 	AttestationTimeout time.Duration
+
+	// TrustPolicyUpdates enables dynamic trust policy. It replaces
+	// TrustPolicyFile and TrustPolicyJSON rather than supplementing them: a
+	// client has exactly one source of trust, so there is never a question of
+	// which one was in force.
+	TrustPolicyUpdates *TrustPolicyUpdates
 
 	// StateFile enables persistence of verification evidence and request
 	// metadata. Prompt and response content is never stored. Empty keeps history
@@ -79,6 +119,9 @@ type Client struct {
 	confidential *confidential.Client
 	handler      http.Handler
 	ledger       *ledger.Ledger
+
+	stopRefresh context.CancelFunc
+	refreshDone chan struct{}
 }
 
 // New constructs a Nexus client and verifies the Gateway before returning.
@@ -90,16 +133,6 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	gatewayURL, timeout, err := validateConfig(config)
 	if err != nil {
 		return nil, err
-	}
-
-	var policy *attestation.Policy
-	if len(config.TrustPolicyJSON) > 0 {
-		policy, err = attestation.ParsePolicy(config.TrustPolicyJSON)
-	} else {
-		policy, err = attestation.LoadPolicy(config.TrustPolicyFile)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("load trust policy: %w", err)
 	}
 
 	defaultTransport, ok := http.DefaultTransport.(*http.Transport)
@@ -116,6 +149,26 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		Transport:     transport,
 		Timeout:       timeout,
 		CheckRedirect: rejectRedirects,
+	}
+
+	var source *release.Source
+	var policy *attestation.Policy
+	if config.TrustPolicyUpdates != nil {
+		source, err = newReleaseSource(*config.TrustPolicyUpdates, plainClient)
+		if err != nil {
+			return nil, err
+		}
+		fetchContext, cancelFetch := context.WithTimeout(ctx, timeout)
+		policy, err = source.Policy(fetchContext)
+		cancelFetch()
+		if err != nil {
+			return nil, fmt.Errorf("derive trust policy from signed releases: %w", err)
+		}
+	} else {
+		policy, err = loadStaticPolicy(config)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	verifier, err := attestation.NewVerifier(
@@ -171,13 +224,93 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		handler = handler.WithModelCatalog(catalogClient)
 	}
 
-	return &Client{
+	client := &Client{
 		gatewayURL:   gatewayURL,
 		timeout:      timeout,
 		confidential: confidentialClient,
 		handler:      handler,
 		ledger:       verificationLedger,
-	}, nil
+	}
+	if source != nil {
+		client.startPolicyRefresh(source, verifier, refreshInterval(*config.TrustPolicyUpdates), logger)
+	}
+	return client, nil
+}
+
+// loadStaticPolicy reads the pinned policy file or JSON. validateConfig has
+// already established that exactly one of them is set.
+func loadStaticPolicy(config Config) (*attestation.Policy, error) {
+	var (
+		policy *attestation.Policy
+		err    error
+	)
+	if len(config.TrustPolicyJSON) > 0 {
+		policy, err = attestation.ParsePolicy(config.TrustPolicyJSON)
+	} else {
+		policy, err = attestation.LoadPolicy(config.TrustPolicyFile)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load trust policy: %w", err)
+	}
+	return policy, nil
+}
+
+func newReleaseSource(updates TrustPolicyUpdates, client *http.Client) (*release.Source, error) {
+	source, err := release.NewSource(updates.Repository, updates.Releases, client)
+	if err != nil {
+		return nil, fmt.Errorf("configure release source: %w", err)
+	}
+	if strings.TrimSpace(updates.CacheFile) != "" {
+		cache, err := release.NewFileCache(updates.CacheFile)
+		if err != nil {
+			return nil, fmt.Errorf("configure release cache: %w", err)
+		}
+		source = source.WithCache(cache)
+	}
+	return source, nil
+}
+
+func refreshInterval(updates TrustPolicyUpdates) time.Duration {
+	if updates.Interval > 0 {
+		return updates.Interval
+	}
+	return defaultPolicyRefreshInterval
+}
+
+// startPolicyRefresh keeps the trust policy current while the client runs. A
+// failed refresh is logged and the previous policy stays in force, so losing
+// the network narrows nothing and widens nothing.
+func (c *Client) startPolicyRefresh(
+	source *release.Source,
+	verifier *attestation.Verifier,
+	interval time.Duration,
+	logger *log.Logger,
+) {
+	refreshContext, cancel := context.WithCancel(context.Background())
+	c.stopRefresh = cancel
+	c.refreshDone = make(chan struct{})
+	go func() {
+		defer close(c.refreshDone)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-refreshContext.Done():
+				return
+			case <-ticker.C:
+				fetchContext, cancelFetch := context.WithTimeout(refreshContext, c.timeout)
+				policy, err := source.Policy(fetchContext)
+				cancelFetch()
+				if err != nil {
+					logger.Printf("refresh trust policy: %v", err)
+					continue
+				}
+				if err := verifier.SetPolicy(policy); err != nil {
+					logger.Printf("apply refreshed trust policy: %v", err)
+				}
+			}
+		}
+	}()
 }
 
 // GatewayURL returns the normalized HTTPS origin this client verifies.
@@ -315,9 +448,15 @@ func (c *Client) Flush() error {
 	return c.ledger.Flush()
 }
 
-// Close flushes persistent verification history. The Client owns no listener;
-// an application embedding Handler remains responsible for its HTTP server.
+// Close stops trust policy refresh and flushes persistent verification
+// history. The Client owns no listener; an application embedding Handler
+// remains responsible for its HTTP server.
 func (c *Client) Close() error {
+	if c != nil && c.stopRefresh != nil {
+		c.stopRefresh()
+		<-c.refreshDone
+		c.stopRefresh = nil
+	}
 	return c.Flush()
 }
 
@@ -326,10 +465,21 @@ func validateConfig(config Config) (string, time.Duration, error) {
 	if err != nil {
 		return "", 0, err
 	}
-	hasPolicyFile := strings.TrimSpace(config.TrustPolicyFile) != ""
-	hasPolicyJSON := len(config.TrustPolicyJSON) > 0
-	if hasPolicyFile == hasPolicyJSON {
-		return "", 0, errors.New("exactly one of trust policy file or JSON is required")
+	sources := 0
+	if strings.TrimSpace(config.TrustPolicyFile) != "" {
+		sources++
+	}
+	if len(config.TrustPolicyJSON) > 0 {
+		sources++
+	}
+	if config.TrustPolicyUpdates != nil {
+		sources++
+	}
+	if sources != 1 {
+		return "", 0, errors.New("exactly one of trust policy file, trust policy JSON, or trust policy updates is required")
+	}
+	if config.TrustPolicyUpdates != nil && config.TrustPolicyUpdates.Interval < 0 {
+		return "", 0, errors.New("trust policy refresh interval must not be negative")
 	}
 	timeout := config.AttestationTimeout
 	if timeout == 0 {

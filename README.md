@@ -39,7 +39,46 @@ curl -fsSLo nexus-gateway-policy.json \
 ```
 
 Keep this file updated when DAppNode publishes support for a new Gateway
-release.
+release, or let the SDK track releases for you with `--trust-policy-updates`
+described below.
+
+## Follow signed releases instead of pinning a file
+
+A pinned file has to be reshipped for every Gateway release, and a client
+running an old one fails closed the moment the Gateway moves on.
+`--trust-policy-updates` removes that step:
+
+```sh
+nexus-proxy \
+  --gateway-url https://nexus-api-tee.dappnode.com \
+  --trust-policy-updates \
+  --trust-policy-cache /var/lib/nexus-proxy/releases.json
+```
+
+The SDK reads the measurements from the most recent Gateway releases, each
+signed during the release workflow with a Sigstore certificate issued to that
+workflow's GitHub identity. Only a signature from that exact identity is
+accepted, so the download itself is not trusted: GitHub is a CDN here, and a
+swapped or edited release is rejected rather than believed.
+
+This changes only where the measurements come from. They are still compared
+against the enclave's attestation exactly as before, and the body-encryption
+contract stays compiled into the SDK — a release may say which build to trust,
+never what protection that build owes you.
+
+`--trust-policy-cache` keeps the signed material from the last successful fetch
+so a client that starts without a network rebuilds the same policy. Every
+signature is re-verified on load, so a tampered cache is rejected rather than
+believed.
+
+`--trust-policy-updates` and `--trust-policy` are mutually exclusive: a client
+has exactly one source of trust, so there is never a question of which one was
+in force. If neither the network nor the cache can produce a verified policy,
+the SDK refuses to start rather than falling back to something older.
+
+The refresh interval defaults to six hours (`--trust-policy-refresh`). A failed
+refresh leaves the policy already in force untouched, so losing the network
+neither widens nor empties what the client accepts.
 
 ## Start the SDK
 
