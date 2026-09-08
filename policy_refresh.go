@@ -21,7 +21,11 @@ type evidenceVerifier interface {
 // minimumTriggeredRefreshInterval bounds how often a failed verification may
 // cause a refresh. Without it a Gateway serving an unrecognised revision would
 // make every request fetch the release list again.
-const minimumTriggeredRefreshInterval = time.Minute
+//
+// A deploy still recovers on the first request that meets it, because the
+// first refresh is never delayed. This only limits how often an unrecognised
+// Gateway can be re-checked afterwards.
+const minimumTriggeredRefreshInterval = 5 * time.Minute
 
 // refreshingVerifier refreshes the trust policy the moment it meets a Gateway
 // release it does not recognise, then verifies once more.
