@@ -16,6 +16,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/anchorageoss/awsnitroverifier"
@@ -69,6 +70,16 @@ type ingressManifest struct {
 	E2EE json.RawMessage `json:"e2ee"`
 }
 
+// ErrUnpinnedRelease reports that the Gateway attested a source revision the
+// current trust policy does not list. It is the signal that a client following
+// signed releases should refresh its policy and try once more: a newly deployed
+// Gateway release looks exactly like this until the policy catches up.
+//
+// It deliberately does not cover a measurement mismatch. A revision that is
+// pinned but whose PCRs disagree is not a stale policy, and refetching must
+// never be able to talk a client into accepting it.
+var ErrUnpinnedRelease = errors.New("attested source_revision is not a pinned Gateway release")
+
 // Evidence is the verified, signed binding between a measured Gateway build
 // and its process-local EHBP key.
 //
@@ -99,8 +110,15 @@ type Proof struct {
 
 // Verifier fetches nonce-bound evidence and validates it against a Policy.
 type Verifier struct {
-	endpoint      string
-	policy        Policy
+	endpoint string
+
+	// policyMu guards policy so a dynamic trust policy can be replaced while
+	// verifications are in flight. A verification always runs against one
+	// coherent snapshot: policies are replaced wholesale, never mutated, so a
+	// release pointer taken from a snapshot stays valid for that verification.
+	policyMu sync.RWMutex
+	policy   Policy
+
 	httpClient    httpDoer
 	document      documentVerifier
 	random        io.Reader
@@ -254,11 +272,13 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 		return nil, errors.New("invalid attestation verifier state")
 	}
 
+	policy := v.Policy()
+
 	manifestDigest := sha512.Sum384(fetched.manifest)
 	if subtle.ConstantTimeCompare(fetched.userData, manifestDigest[:]) != 1 {
 		return nil, errors.New("response user_data does not match SHA-384(manifest)")
 	}
-	release, err := v.validateManifest(fetched.manifest)
+	release, err := validateManifestAgainst(&policy, fetched.manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -330,9 +350,9 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 			PCRs:            retainedPCRs,
 			RootFingerprint: result.RootFingerprint,
 			SourceRevision:  release.SourceRevision,
-			Workload:        v.policy.Workload,
-			Profile:         v.policy.Profile,
-			E2EE:            v.policy.E2EE,
+			Workload:        policy.Workload,
+			Profile:         policy.Profile,
+			E2EE:            policy.E2EE,
 		},
 	}, nil
 }
@@ -340,22 +360,47 @@ func (v *Verifier) validate(fetched *fetchedEvidence, nonce []byte, now time.Tim
 // MaximumAge is the attestation validity window this verifier enforces.
 func (v *Verifier) MaximumAge() time.Duration { return v.maxAge }
 
+// SetPolicy replaces the pinned trust policy. It is used when the policy is
+// derived from signed Gateway releases and refreshed while the client runs.
+// A rejected policy leaves the previous one in force, so a bad refresh can
+// never widen or empty what this verifier accepts.
+func (v *Verifier) SetPolicy(policy *Policy) error {
+	if policy == nil {
+		return errors.New("trust policy is required")
+	}
+	replacement := *policy
+	if err := replacement.validate(); err != nil {
+		return err
+	}
+	v.policyMu.Lock()
+	v.policy = replacement
+	v.policyMu.Unlock()
+	return nil
+}
+
+// Policy returns a snapshot of the trust policy currently in force.
+func (v *Verifier) Policy() Policy {
+	v.policyMu.RLock()
+	defer v.policyMu.RUnlock()
+	return v.policy
+}
+
 // validateManifest checks the claims every pinned release shares, then selects
 // the single release the evidence claims to be. The manifest is bound to the
 // signed document through user_data, so the selected release cannot be chosen
 // by an attacker independently of the measurements that are checked against it.
-func (v *Verifier) validateManifest(raw json.RawMessage) (*Release, error) {
+func validateManifestAgainst(policy *Policy, raw json.RawMessage) (*Release, error) {
 	var manifest manifestClaims
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, fmt.Errorf("decode attested manifest: %w", err)
 	}
-	if manifest.SchemaVersion != v.policy.ManifestSchemaVersion {
+	if manifest.SchemaVersion != policy.ManifestSchemaVersion {
 		return nil, errors.New("attested manifest schema_version does not match the trust policy")
 	}
-	if manifest.Workload != v.policy.Workload {
+	if manifest.Workload != policy.Workload {
 		return nil, errors.New("attested workload does not match the trust policy")
 	}
-	if manifest.Profile != v.policy.Profile {
+	if manifest.Profile != policy.Profile {
 		return nil, errors.New("attested profile does not match the trust policy")
 	}
 	if len(manifest.Ingress.E2EE) == 0 || bytes.Equal(manifest.Ingress.E2EE, []byte("null")) {
@@ -365,12 +410,12 @@ func (v *Verifier) validateManifest(raw json.RawMessage) (*Release, error) {
 	if err := jsonutil.DecodeStrict(manifest.Ingress.E2EE, &e2ee); err != nil {
 		return nil, fmt.Errorf("decode attested ingress.e2ee: %w", err)
 	}
-	if e2ee != v.policy.E2EE {
+	if e2ee != policy.E2EE {
 		return nil, errors.New("attested ingress.e2ee does not match the trust policy")
 	}
-	release, pinned := v.policy.releaseFor(manifest.SourceRevision)
+	release, pinned := policy.releaseFor(manifest.SourceRevision)
 	if !pinned {
-		return nil, errors.New("attested source_revision is not a pinned Gateway release")
+		return nil, fmt.Errorf("%w: %s", ErrUnpinnedRelease, manifest.SourceRevision)
 	}
 	return release, nil
 }

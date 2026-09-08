@@ -38,6 +38,9 @@ type config struct {
 	verificationUI     bool
 	modelCatalog       bool
 	stateFile          string
+	policyUpdates      bool
+	policyCacheFile    string
+	policyRefresh      time.Duration
 }
 
 func main() {
@@ -56,7 +59,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	logger := log.New(stderr, "nexus-proxy: ", log.LstdFlags|log.LUTC)
 	warmupContext, cancelWarmup := context.WithTimeout(context.Background(), configuration.attestationTimeout)
-	sdk, err := nexus.New(warmupContext, nexus.Config{
+	sdkConfig := nexus.Config{
 		GatewayURL:            configuration.gatewayOrigin,
 		TrustPolicyFile:       configuration.trustPolicyPath,
 		AttestationTimeout:    configuration.attestationTimeout,
@@ -64,7 +67,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		DisableVerificationUI: !configuration.verificationUI,
 		DisableModelCatalog:   !configuration.modelCatalog,
 		Logger:                logger,
-	})
+	}
+	if configuration.policyUpdates {
+		sdkConfig.TrustPolicyUpdates = &nexus.TrustPolicyUpdates{
+			CacheFile: configuration.policyCacheFile,
+			Interval:  configuration.policyRefresh,
+		}
+	}
+	sdk, err := nexus.New(warmupContext, sdkConfig)
 	cancelWarmup()
 	if err != nil {
 		logger.Printf("initialize Nexus SDK: %v", err)
@@ -98,6 +108,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		serverErrors <- server.Serve(listener)
 	}()
 	logger.Printf("verified Gateway and listening on http://%s", listener.Addr())
+	if configuration.policyUpdates {
+		logger.Printf("trust policy follows signed Gateway releases; refreshed on first contact with an unknown release, and every %s as a backstop", configuration.policyRefresh)
+	}
 	if configuration.verificationUI {
 		logger.Printf("privacy verification UI at http://%s%s", listener.Addr(), nexus.VerificationPath)
 	}
@@ -176,6 +189,9 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 	verificationUI := flags.Bool("verification-ui", true, "serve the local privacy verification page and its JSON API")
 	modelCatalog := flags.Bool("model-catalog", true, "serve GET /v1/models by passing the Gateway's public model catalog through over ordinary TLS")
 	stateFile := flags.String("state-file", "", "persist verification history to this file; empty keeps it in memory only")
+	policyUpdates := flags.Bool("trust-policy-updates", false, "derive the trust policy from signed Gateway releases instead of pinning one with --trust-policy")
+	policyCacheFile := flags.String("trust-policy-cache", "", "cache signed releases here so an offline start can rebuild the same policy")
+	policyRefresh := flags.Duration("trust-policy-refresh", time.Hour, "background backstop for refreshing the trust policy; a new Gateway release is normally picked up on first contact, without waiting for this")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}
@@ -186,8 +202,11 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(*trustPolicy) == "" {
-		return nil, errors.New("--trust-policy is required")
+	if (strings.TrimSpace(*trustPolicy) != "") == *policyUpdates {
+		return nil, errors.New("set exactly one of --trust-policy or --trust-policy-updates")
+	}
+	if *policyRefresh <= 0 {
+		return nil, errors.New("--trust-policy-refresh must be positive")
 	}
 	if err := validateListenAddress(*listen, *listenScope); err != nil {
 		return nil, err
@@ -204,6 +223,9 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 		verificationUI:     *verificationUI,
 		modelCatalog:       *modelCatalog,
 		stateFile:          *stateFile,
+		policyUpdates:      *policyUpdates,
+		policyCacheFile:    *policyCacheFile,
+		policyRefresh:      *policyRefresh,
 	}, nil
 }
 

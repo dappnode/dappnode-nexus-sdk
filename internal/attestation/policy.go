@@ -24,11 +24,12 @@ const (
 	maxPolicyBytes = 64 << 10
 	pcrBytes       = 48
 
-	// A policy accepts a small set of Gateway releases so a Gateway can be
-	// rolled out without every client failing closed in the interval before it
-	// is updated. Keeping the set small keeps the trusted code surface small:
-	// list only the release being replaced and the one replacing it.
-	maxPolicyReleases = 4
+	// MaxPolicyReleases caps how many Gateway releases a policy may accept, so
+	// a Gateway can be rolled out without every client failing closed in the
+	// interval before it is updated. Keeping the set small keeps the trusted
+	// code surface small: list only the release being replaced and the one
+	// replacing it.
+	MaxPolicyReleases = 4
 )
 
 var sourceRevisionPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
@@ -129,8 +130,8 @@ func (p *Policy) validate() error {
 	if len(p.Releases) == 0 {
 		return errors.New("trust policy must pin at least one Gateway release")
 	}
-	if len(p.Releases) > maxPolicyReleases {
-		return fmt.Errorf("trust policy must not pin more than %d Gateway releases", maxPolicyReleases)
+	if len(p.Releases) > MaxPolicyReleases {
+		return fmt.Errorf("trust policy must not pin more than %d Gateway releases", MaxPolicyReleases)
 	}
 	seen := make(map[string]struct{}, len(p.Releases))
 	for index := range p.Releases {

@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "release": {
+    "version": "v0.1.61",
+    "environment": "prod"
+  },
+  "source": {
+    "repository": "https://github.com/dappnode/dappnode-nexus-gateway",
+    "revision": "893f4c9f306707b83f3b41782f25eb05adbc4f30",
+    "ref": "refs/heads/main"
+  },
+  "build": {
+    "workflow_run_url": "https://github.com/dappnode/dappnode-nexus-gateway/actions/runs/33742472400",
+    "architecture": "x86_64",
+    "enclave_dockerfile": "apps/gateway/Dockerfile.enclave",
+    "enclave_image_id": "sha256:d9d17d802091e903face5ce09ee7c8cce03b788ac31daef02b6de3c20b288554",
+    "nitro_cli_version": "1.4.5",
+    "nitro_builder_image_id": "sha256:ab5ad70ef2163200e3581d3aaa2ae4f56a64390c84dcee3097d3243f8e428ac0",
+    "source_date_epoch": 1788429913,
+    "aws_region": "eu-central-1",
+    "kms_key_arn": "arn:aws:kms:eu-central-1:883233562864:key/7844cb28-75fc-4ce6-9c10-6865e02a83d9"
+  },
+  "normal_image": {
+    "reference": "883233562864.dkr.ecr.eu-central-1.amazonaws.com/nexus-gateway:v0.1.61",
+    "digest": "sha256:27c487429f307d5aa2925ebc9705c8b02fea54b2ccf2cf26d7c56b6f8ad522d6"
+  },
+  "enclave": {
+    "filename": "nexus-gateway-v0.1.61-prod-eu-central-1-x86_64.eif",
+    "sha256": "fb5902b2e53b29df3ae154b93a63e6543e88752e15cc2988856b3004ca104ed8",
+    "size_bytes": 40537545,
+    "measurements": {
+      "schema_version": 2,
+      "hash_algorithm": "sha384",
+      "pcr0": "61e070dd4c7e2956affe2684413ccaa5dac8a6fb0f55ca144d9671ce578e72464e30eaf09226a3073f0a3d03a2f809c1",
+      "pcr1": "4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493",
+      "pcr2": "93dabb78d8939fe34f913421bfe2423f2cff29f30504a01c9ce9b1ee5eb3334188f43b87e569daf61370d4b0a317ba69"
+    }
+  },
+  "reproducibility": {
+    "measurements": true,
+    "eif_sha256": false,
+    "verify_with": "deploy/nitro/verify-build.sh",
+    "note": "Rebuilding this revision reproduces pcr0/pcr1/pcr2 exactly. The EIF file hash is deliberately not reproducible: nitro-cli stamps the build time into an EIF metadata section that PCR0 excludes by design, so the checksum below verifies a download and must not be used to compare independent builds."
+  },
+  "security_profile": {
+    "tls_in_enclave": false,
+    "api_key_in_authorization_header": true,
+    "body_e2ee": {
+      "protocol": "ehbp-v1",
+      "suite": "DHKEM-X25519-HKDF-SHA256/HKDF-SHA256/AES-256-GCM",
+      "endpoint": "/v1/confidential/chat/completions",
+      "hpke_key_source": "nitro-attestation-public-key"
+    }
+  }
+}

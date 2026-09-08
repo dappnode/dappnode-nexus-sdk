@@ -95,7 +95,7 @@ func TestPolicyRejectsUnsafeOrAmbiguousValues(t *testing.T) {
 		{
 			name: "too many releases",
 			mutate: func(p *Policy) {
-				for len(p.Releases) <= maxPolicyReleases {
+				for len(p.Releases) <= MaxPolicyReleases {
 					extra := p.Releases[0]
 					extra.SourceRevision = strings.Repeat(string(rune('a'+len(p.Releases))), 40)
 					p.Releases = append(p.Releases, extra)
