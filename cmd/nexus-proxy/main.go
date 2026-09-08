@@ -109,7 +109,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}()
 	logger.Printf("verified Gateway and listening on http://%s", listener.Addr())
 	if configuration.policyUpdates {
-		logger.Printf("trust policy follows signed Gateway releases, refreshed every %s", configuration.policyRefresh)
+		logger.Printf("trust policy follows signed Gateway releases; refreshed on first contact with an unknown release, and every %s as a backstop", configuration.policyRefresh)
 	}
 	if configuration.verificationUI {
 		logger.Printf("privacy verification UI at http://%s%s", listener.Addr(), nexus.VerificationPath)
@@ -191,7 +191,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, error) {
 	stateFile := flags.String("state-file", "", "persist verification history to this file; empty keeps it in memory only")
 	policyUpdates := flags.Bool("trust-policy-updates", false, "derive the trust policy from signed Gateway releases instead of pinning one with --trust-policy")
 	policyCacheFile := flags.String("trust-policy-cache", "", "cache signed releases here so an offline start can rebuild the same policy")
-	policyRefresh := flags.Duration("trust-policy-refresh", 6*time.Hour, "how often to refresh the trust policy from signed releases")
+	policyRefresh := flags.Duration("trust-policy-refresh", time.Hour, "background backstop for refreshing the trust policy; a new Gateway release is normally picked up on first contact, without waiting for this")
 	if err := flags.Parse(args); err != nil {
 		return nil, err
 	}

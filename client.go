@@ -42,10 +42,11 @@ const (
 
 	defaultAttestationTimeout = 15 * time.Second
 
-	// defaultPolicyRefreshInterval keeps a running client current without
-	// making it chatty: a Gateway release is a rare, planned event, and the
-	// previous policy stays valid until the new one is fetched.
-	defaultPolicyRefreshInterval = 6 * time.Hour
+	// defaultPolicyRefreshInterval is a backstop, not the mechanism: a client
+	// following signed releases refreshes as soon as it meets a Gateway release
+	// it does not recognise, so a deploy is picked up in seconds rather than on
+	// this schedule.
+	defaultPolicyRefreshInterval = time.Hour
 )
 
 // ErrEvidenceNotFound is returned when verification evidence is no longer in
@@ -76,7 +77,9 @@ type TrustPolicyUpdates struct {
 	// is re-verified on load. Empty disables caching.
 	CacheFile string
 
-	// Interval is how often the policy is refreshed. Empty uses six hours.
+	// Interval is how often the policy is refreshed in the background. Empty
+	// uses one hour. This is only a backstop: a Gateway release is normally
+	// picked up the first time a request meets it, without waiting for a tick.
 	Interval time.Duration
 }
 
@@ -179,9 +182,21 @@ func New(ctx context.Context, config Config) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure attestation verifier: %w", err)
 	}
+	logger := config.Logger
+	if logger == nil {
+		logger = log.New(io.Discard, "", 0)
+	}
+
+	// A client following signed releases re-derives its policy the moment it
+	// meets a Gateway release it does not recognise, so a deploy does not have
+	// to wait for the next periodic refresh.
+	var evidenceSource evidenceVerifier = verifier
+	if source != nil {
+		evidenceSource = newRefreshingVerifier(verifier, source, logger)
+	}
 	confidentialClient, err := confidential.NewClient(
 		gatewayURL+attestation.ConfidentialEndpoint,
-		verifier,
+		evidenceSource,
 		wireClient,
 	)
 	if err != nil {
@@ -204,10 +219,6 @@ func New(ctx context.Context, config Config) (*Client, error) {
 		return nil, fmt.Errorf("initial Gateway attestation failed: %w", err)
 	}
 
-	logger := config.Logger
-	if logger == nil {
-		logger = log.New(io.Discard, "", 0)
-	}
 	handler, err := proxy.NewHandler(confidentialClient, logger)
 	if err != nil {
 		return nil, fmt.Errorf("configure OpenAI-compatible handler: %w", err)

@@ -76,9 +76,21 @@ has exactly one source of trust, so there is never a question of which one was
 in force. If neither the network nor the cache can produce a verified policy,
 the SDK refuses to start rather than falling back to something older.
 
-The refresh interval defaults to six hours (`--trust-policy-refresh`). A failed
-refresh leaves the policy already in force untouched, so losing the network
-neither widens nor empties what the client accepts.
+A newly deployed Gateway is picked up **on first contact**, not on a timer. A
+Gateway release the policy has never heard of is exactly what a new deployment
+looks like, so the SDK treats it as the signal to re-derive the policy and
+verify again, in the same request. Nothing has to be pushed to the client,
+which matters because these run behind NAT.
+
+Only an unrecognised release triggers that. A release that *is* pinned but
+whose measurements disagree is never retried: refetching must not be able to
+talk a client into accepting a build whose code does not match what was signed.
+Triggered refreshes are rate-limited, so a Gateway stuck on an unknown revision
+cannot make every request refetch.
+
+`--trust-policy-refresh` is a background backstop on top of that, defaulting to
+one hour. A failed refresh leaves the policy already in force untouched, so
+losing the network neither widens nor empties what the client accepts.
 
 ## Start the SDK
 

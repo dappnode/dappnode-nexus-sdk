@@ -70,6 +70,16 @@ type ingressManifest struct {
 	E2EE json.RawMessage `json:"e2ee"`
 }
 
+// ErrUnpinnedRelease reports that the Gateway attested a source revision the
+// current trust policy does not list. It is the signal that a client following
+// signed releases should refresh its policy and try once more: a newly deployed
+// Gateway release looks exactly like this until the policy catches up.
+//
+// It deliberately does not cover a measurement mismatch. A revision that is
+// pinned but whose PCRs disagree is not a stale policy, and refetching must
+// never be able to talk a client into accepting it.
+var ErrUnpinnedRelease = errors.New("attested source_revision is not a pinned Gateway release")
+
 // Evidence is the verified, signed binding between a measured Gateway build
 // and its process-local EHBP key.
 //
@@ -405,7 +415,7 @@ func validateManifestAgainst(policy *Policy, raw json.RawMessage) (*Release, err
 	}
 	release, pinned := policy.releaseFor(manifest.SourceRevision)
 	if !pinned {
-		return nil, errors.New("attested source_revision is not a pinned Gateway release")
+		return nil, fmt.Errorf("%w: %s", ErrUnpinnedRelease, manifest.SourceRevision)
 	}
 	return release, nil
 }
