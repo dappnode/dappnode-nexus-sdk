@@ -42,11 +42,11 @@ Keep this file updated when Dappnode publishes support for a new Gateway
 release, or let the SDK track releases for you with `--trust-policy-updates`
 described below.
 
-## Follow signed releases instead of pinning a file
+## Follow signed releases
 
-A pinned file has to be reshipped for every Gateway release, and a client
-running an old one fails closed the moment the Gateway moves on.
-`--trust-policy-updates` removes that step:
+`--trust-policy-updates` derives measurements from the most recent Gateway
+releases instead of a pinned file, so the client is never stranded when the
+Gateway moves on:
 
 ```sh
 nexus-proxy \
@@ -55,42 +55,27 @@ nexus-proxy \
   --trust-policy-cache /var/lib/nexus-proxy/releases.json
 ```
 
-The SDK reads the measurements from the most recent Gateway releases, each
-signed during the release workflow with a Sigstore certificate issued to that
-workflow's GitHub identity. Only a signature from that exact identity is
-accepted, so the download itself is not trusted: GitHub is a CDN here, and a
-swapped or edited release is rejected rather than believed.
+Each release is signed during the Gateway release workflow with a Sigstore
+certificate issued to that workflow's GitHub identity, and only that exact
+identity is accepted — GitHub is a CDN here, so a swapped release is rejected
+rather than believed. This changes only where measurements come from; they are
+still compared against the live attestation, and the body-encryption contract
+stays compiled into the SDK.
 
-This changes only where the measurements come from. They are still compared
-against the enclave's attestation exactly as before, and the body-encryption
-contract stays compiled into the SDK — a release may say which build to trust,
-never what protection that build owes you.
+A new Gateway is picked up **on first contact**, not on a timer: a release the
+policy has never seen is what a new deployment looks like, so the SDK
+re-derives and verifies within the same request. Nothing has to be pushed to
+the client, which matters behind NAT. Only an *unrecognised* release triggers
+that — a pinned release whose measurements disagree is never retried, and
+triggered refreshes are rate-limited. `--trust-policy-refresh` is an hourly
+backstop; a failed refresh leaves the policy in force untouched.
 
-`--trust-policy-cache` keeps the signed material from the last successful fetch
-so a client that starts without a network rebuilds the same policy. Every
-signature is re-verified on load, so a tampered cache is rejected rather than
-believed.
+`--trust-policy-cache` keeps the signed material so an offline start rebuilds
+the same policy, re-verifying every signature on load.
 
-`--trust-policy-updates` and `--trust-policy` are mutually exclusive: a client
-has exactly one source of trust, so there is never a question of which one was
-in force. If neither the network nor the cache can produce a verified policy,
-the SDK refuses to start rather than falling back to something older.
-
-A newly deployed Gateway is picked up **on first contact**, not on a timer. A
-Gateway release the policy has never heard of is exactly what a new deployment
-looks like, so the SDK treats it as the signal to re-derive the policy and
-verify again, in the same request. Nothing has to be pushed to the client,
-which matters because these run behind NAT.
-
-Only an unrecognised release triggers that. A release that *is* pinned but
-whose measurements disagree is never retried: refetching must not be able to
-talk a client into accepting a build whose code does not match what was signed.
-Triggered refreshes are rate-limited, so a Gateway stuck on an unknown revision
-cannot make every request refetch.
-
-`--trust-policy-refresh` is a background backstop on top of that, defaulting to
-one hour. A failed refresh leaves the policy already in force untouched, so
-losing the network neither widens nor empties what the client accepts.
+`--trust-policy-updates` and `--trust-policy` are mutually exclusive. If
+neither the network nor the cache produces a verified policy, the SDK refuses
+to start.
 
 ## Start the SDK
 
