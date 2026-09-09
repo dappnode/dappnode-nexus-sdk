@@ -70,6 +70,30 @@ header.top .sub { color: var(--ink-dim); font-size: 13px; }
 
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
 
+/* Disclosure. Without this it renders as a bare marker and reads as more body
+   text, which defeats the point of hiding the detail in the first place. */
+details.more { margin: 14px 0 0; }
+details.more > summary {
+  cursor: pointer; user-select: none; list-style: none;
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 550; color: var(--accent);
+  padding: 5px 12px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel);
+}
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸"; font-size: 10px; opacity: 0.75; }
+details.more[open] > summary::before { content: "▾"; }
+details.more[open] > summary {
+  border-radius: 8px 8px 0 0; border-bottom-color: transparent; margin-bottom: 0;
+}
+details.more .more-body {
+  border: 1px solid var(--line); border-top: none; border-radius: 0 8px 8px 8px;
+  background: var(--panel-2); padding: 14px 16px 2px; max-width: 68ch;
+}
+details.more .more-body p {
+  font-size: 13.5px; line-height: 1.6; color: var(--ink-dim); margin: 0 0 12px;
+}
+
 .checks { list-style: none; margin: 0; padding: 0; }
 .checks li { display: flex; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line); }
 .checks li:last-child { border-bottom: 0; }
@@ -125,10 +149,10 @@ td { padding: 9px 10px 9px 0; border-top: 1px solid var(--line); vertical-align:
   <h2>Verification history</h2>
   <div class="card"><div class="scroll" id="history"></div></div>
 
-  <h2>Don't trust this page</h2>
+  <h2>Verify it independently</h2>
   <div class="card">
-    <p class="note">This page is drawn by the same proxy that did the checking, so it cannot prove itself — you should not have to trust it. Download the evidence above and check it with independent tooling instead. That check does not depend on anything this page says.</p>
-    <p class="note">Nothing here is written to disk. The history is kept in memory and starts empty after a restart.</p>
+    <p class="note">Everything above is backed by the signed evidence, and you can re-check it without this page. The two downloads in <strong>Evidence</strong> are the raw proof, exactly as the hardware produced it.</p>
+    <p class="note" id="storage-note"></p>
   </div>
 </main>
 
@@ -181,12 +205,22 @@ function renderHero(data) {
   hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — only the TEE can read your prompts</span></div>'
     + '<p class="why">This proxy checked that Nexus is running inside the TEE it claims to be, then encrypted your prompts to a key only that TEE holds. '
     + 'Nobody in between can read them.</p>'
-    + '<details class="more"><summary>How this was checked</summary>'
-    + '<p class="why">A TEE (trusted execution environment) is hardware that can prove which software is running inside it, and keeps everyone else out — including the machine\'s owner. '
-    + 'Before sending anything, this proxy asked Nexus for that proof. The hardware signed a statement naming the exact software running inside, and it matched what Dappnode published for this release. '
-    + 'Your prompts are then encrypted to a key only that software holds, so everything in between carries ciphertext it cannot read.</p>'
-    + '<p class="why">Re-checked automatically. The current proof is valid for another ' + left + 's.</p>'
-    + '</details>';
+    + '<details class="more"><summary>How this was checked</summary><div class="more-body">'
+    + '<p>A TEE (trusted execution environment) is hardware that can prove which software is running inside it, and keeps everyone else out — including the machine\'s owner.</p>'
+    + '<p>Before sending anything, this proxy asked Nexus for that proof. The hardware signed a statement naming the exact software running inside, and it matched what Dappnode signed for this Gateway release. Your prompts are then encrypted to a key only that software holds.</p>'
+    + '<p>Re-checked automatically — this proof is good for another ' + left + 's.</p>'
+    + '</div></details>';
+}
+
+function renderStorageNote(data) {
+  const el = document.getElementById("storage-note");
+  if (!el) return;
+  // This used to claim nothing was written to disk, which is false whenever the
+  // proxy runs with --state-file — as the Dappnode package does, on a named
+  // volume so the history survives restarts and is included in backups.
+  el.innerHTML = data.persistent
+    ? "This history is kept on disk so it survives a restart. It holds verification evidence and per-request identifiers, timing and sizes — never a prompt or a reply."
+    : "This history is kept in memory only and starts empty after a restart. It holds verification evidence and per-request identifiers, timing and sizes — never a prompt or a reply.";
 }
 
 function renderStats(data) {
@@ -239,8 +273,13 @@ function renderEvidence(data) {
     ([k, v]) => "<dt>" + esc(k) + "</dt><dd>" + esc(v || "—") + "</dd>"
   ).join("") + "</dl>"
     + '<div class="row">'
-    + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '">Download attestation document</a>'
-    + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '&part=manifest">Download signed manifest</a>'
+    + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '">Download attestation (.cose)</a>'
+    + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '&part=manifest">Download manifest (.json)</a>'
+    + '<details class="more"><summary>What are these files?</summary><div class="more-body">'
+    + '<p>You do not need them for anything day to day. They are here so you can check this proxy\'s work instead of taking its word for it.</p>'
+    + '<p>The <strong>.cose</strong> file is the attestation itself: the statement the TEE hardware signed, in the standard COSE_Sign1 format, byte for byte as received. Feed it to any independent AWS Nitro verifier to confirm the signature, the certificate chain and the measurements shown above.</p>'
+    + '<p>The <strong>.json</strong> manifest describes the software that was running. Its SHA-384 is embedded in the signed .cose, so the signature covers it too.</p>'
+    + '</div></details>'
     + '<a class="btn" href="/v1/verification">Raw JSON</a>'
     + "</div>";
 }
@@ -298,6 +337,7 @@ async function refresh() {
     renderStats(data);
     renderChecks(data);
     renderEvidence(data);
+    renderStorageNote(data);
     renderRequests(data);
     renderHistory(data);
   } catch (error) {
