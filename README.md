@@ -192,6 +192,9 @@ http://nexus-local-proxy.dappnode.private:3301/v1
 - The SDK verifies the Gateway before accepting prompts.
 - Prompt and response bodies are encrypted between the SDK and the verified
   Gateway.
+- With a model whose id starts with `private/`, that continues past the
+  Gateway: those are served over an attested, encrypted transport that fails
+  closed, so the prompt is protected end to end.
 - Prompt and response content is not written to verification history or logs.
 
 The machine running the SDK remains trusted. Request metadata, including
