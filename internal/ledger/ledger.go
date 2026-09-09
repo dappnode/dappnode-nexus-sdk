@@ -171,6 +171,9 @@ type Snapshot struct {
 	RejectedTotal  uint64        `json:"rejected_total"`
 	EncryptedTotal uint64        `json:"encrypted_total"`
 	FailedTotal    uint64        `json:"failed_total"`
+	// Persistent reports whether history survives a restart. The page states
+	// this to the user, so it must come from the ledger rather than be assumed.
+	Persistent     bool          `json:"persistent"`
 	Current        *Attestation  `json:"current,omitempty"`
 	Attestations   []Attestation `json:"attestations"`
 	Requests       []Request     `json:"requests"`
@@ -189,6 +192,7 @@ func (l *Ledger) Snapshot() Snapshot {
 		FailedTotal:    l.failedTotal,
 		Attestations:   withoutEvidence(reversed(l.attestations)),
 		Requests:       reversed(l.requests),
+		Persistent:     l.store != nil,
 	}
 	switch {
 	case len(snapshot.Attestations) == 0:

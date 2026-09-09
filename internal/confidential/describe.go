@@ -40,7 +40,7 @@ func describeEvidence(id string, evidence *attestation.Evidence, verifiedAt time
 			{
 				Name:   "Hardware signature",
 				Passed: true,
-				Detail: "The evidence is signed by the AWS Nitro Security Module of enclave " + proof.ModuleID + ". Only real Nitro hardware can produce this signature.",
+				Detail: "Signed by the TEE's hardware security module (AWS Nitro), module " + proof.ModuleID + ". Only real hardware can produce this signature.",
 			},
 			{
 				Name:   "AWS certificate chain",
@@ -50,7 +50,7 @@ func describeEvidence(id string, evidence *attestation.Evidence, verifiedAt time
 			{
 				Name:   "Freshness: this proxy's nonce",
 				Passed: true,
-				Detail: "The enclave signed the random 32-byte challenge this proxy generated, so the evidence cannot be a replay of an older attestation.",
+				Detail: "The TEE signed the random 32-byte challenge this proxy generated, so the evidence cannot be a replay of an older attestation.",
 			},
 			{
 				Name:   "Freshness: signing time",
@@ -60,17 +60,17 @@ func describeEvidence(id string, evidence *attestation.Evidence, verifiedAt time
 			{
 				Name:   "Code measurements PCR0, PCR1, PCR2",
 				Passed: true,
-				Detail: "The measurements of the software running in the enclave match, byte for byte, the values pinned in this proxy's local trust policy. Different code produces different measurements.",
+				Detail: "The measurements of the software running in the TEE match, byte for byte, the ones Dappnode signed for this Gateway release. Different code produces different measurements.",
 			},
 			{
 				Name:   "Signed workload manifest",
 				Passed: true,
-				Detail: "The enclave's signed user_data equals SHA-384 of its manifest, so the manifest below is covered by the hardware signature.",
+				Detail: "The TEE's signed user_data equals SHA-384 of its manifest, so the manifest below is covered by the hardware signature.",
 			},
 			{
-				Name:   "Pinned Gateway source revision",
+				Name:   "Gateway source revision",
 				Passed: true,
-				Detail: "The manifest declares source revision " + proof.SourceRevision + ", matching the pinned policy.",
+				Detail: "The manifest declares source revision " + proof.SourceRevision + ", which is the revision this proxy is willing to trust.",
 			},
 			{
 				Name:   "Encryption contract",
@@ -80,7 +80,7 @@ func describeEvidence(id string, evidence *attestation.Evidence, verifiedAt time
 			{
 				Name:   "Key binding",
 				Passed: true,
-				Detail: "The X25519 public key your request bodies are encrypted to is carried inside the signed document. Its private half exists only inside this enclave, so nothing between here and the enclave can read them.",
+				Detail: "The X25519 public key your request bodies are encrypted to is carried inside the signed document. Its private half exists only inside the TEE, so nothing in between can read them.",
 			},
 		},
 	}

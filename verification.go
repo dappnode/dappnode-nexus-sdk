@@ -61,6 +61,7 @@ type Snapshot struct {
 	RejectedTotal  uint64        `json:"rejected_total"`
 	EncryptedTotal uint64        `json:"encrypted_total"`
 	FailedTotal    uint64        `json:"failed_total"`
+	Persistent     bool          `json:"persistent"`
 	Current        *Attestation  `json:"current,omitempty"`
 	Attestations   []Attestation `json:"attestations"`
 	Requests       []Request     `json:"requests"`
@@ -82,6 +83,7 @@ func snapshotFromLedger(source ledger.Snapshot) Snapshot {
 		RejectedTotal:  source.RejectedTotal,
 		EncryptedTotal: source.EncryptedTotal,
 		FailedTotal:    source.FailedTotal,
+		Persistent:     source.Persistent,
 		Attestations:   make([]Attestation, len(source.Attestations)),
 		Requests:       make([]Request, len(source.Requests)),
 	}
