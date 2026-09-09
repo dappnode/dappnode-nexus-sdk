@@ -205,7 +205,7 @@ function renderHero(data) {
   hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — only the TEE can read your prompts</span></div>'
     + '<p class="why">This proxy checked that Nexus is running inside the TEE it claims to be, then encrypted your prompts to a key only that TEE holds. '
     + 'Nobody in between can read them.</p>'
-    + '<details class="more"><summary>How this was checked</summary><div class="more-body">'
+    + '<details class="more" data-key="how"><summary>How this was checked</summary><div class="more-body">'
     + '<p>A TEE (trusted execution environment) is hardware that can prove which software is running inside it, and keeps everyone else out — including the machine\'s owner.</p>'
     + '<p>Before sending anything, this proxy asked Nexus for that proof. The hardware signed a statement naming the exact software running inside, and it matched what Dappnode signed for this Gateway release. Your prompts are then encrypted to a key only that software holds.</p>'
     + '<p>Re-checked automatically — this proof is good for another ' + left + 's.</p>'
@@ -275,13 +275,13 @@ function renderEvidence(data) {
     + '<div class="row">'
     + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '">Download attestation (.cose)</a>'
     + '<a class="btn" href="/v1/verification/document?id=' + encodeURIComponent(current.id) + '&part=manifest">Download manifest (.json)</a>'
-    + '<details class="more"><summary>What are these files?</summary><div class="more-body">'
+    + '<a class="btn" href="/v1/verification">Raw JSON</a>'
+    + "</div>"
+    + '<details class="more" data-key="files"><summary>What are these files?</summary><div class="more-body">'
     + '<p>You do not need them for anything day to day. They are here so you can check this proxy\'s work instead of taking its word for it.</p>'
     + '<p>The <strong>.cose</strong> file is the attestation itself: the statement the TEE hardware signed, in the standard COSE_Sign1 format, byte for byte as received. Feed it to any independent AWS Nitro verifier to confirm the signature, the certificate chain and the measurements shown above.</p>'
     + '<p>The <strong>.json</strong> manifest describes the software that was running. Its SHA-384 is embedded in the signed .cose, so the signature covers it too.</p>'
-    + '</div></details>'
-    + '<a class="btn" href="/v1/verification">Raw JSON</a>'
-    + "</div>";
+    + '</div></details>';
 }
 
 function renderRequests(data) {
@@ -326,11 +326,26 @@ function renderHistory(data) {
     }).join("") + "</tbody></table>";
 }
 
+// The page re-renders on a timer, and every renderer replaces innerHTML, which
+// throws away the open/closed state of a <details> the reader just opened. Note
+// which are open, render, then put them back.
+function openDisclosures() {
+  return new Set(
+    Array.from(document.querySelectorAll("details.more[open]")).map(d => d.dataset.key)
+  );
+}
+function restoreDisclosures(open) {
+  document.querySelectorAll("details.more").forEach(d => {
+    if (open.has(d.dataset.key)) d.open = true;
+  });
+}
+
 async function refresh() {
   try {
     const response = await fetch("/v1/verification", { cache: "no-store" });
     if (!response.ok) throw new Error("HTTP " + response.status);
     const data = await response.json();
+    const open = openDisclosures();
     document.getElementById("gateway").textContent = data.gateway ? "Gateway " + data.gateway : "";
     document.getElementById("refreshed").textContent = "Updated " + new Date().toLocaleTimeString();
     renderHero(data);
@@ -340,6 +355,7 @@ async function refresh() {
     renderStorageNote(data);
     renderRequests(data);
     renderHistory(data);
+    restoreDisclosures(open);
   } catch (error) {
     document.getElementById("refreshed").textContent = "Cannot reach the proxy: " + error.message;
   }
