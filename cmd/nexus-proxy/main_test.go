@@ -57,12 +57,12 @@ func TestValidateListenAddress(t *testing.T) {
 		}
 	}
 	for _, address := range []string{"0.0.0.0:3301", "[::]:3301"} {
-		if err := validateListenAddress(address, listenScopeDAppNode); err != nil {
+		if err := validateListenAddress(address, listenScopeDappnode); err != nil {
 			t.Fatalf("validateListenAddress(%q, dappnode) error = %v", address, err)
 		}
 	}
 	for _, address := range []string{"127.0.0.1:3301", "192.168.1.2:3301", "localhost:3301"} {
-		if err := validateListenAddress(address, listenScopeDAppNode); err == nil {
+		if err := validateListenAddress(address, listenScopeDappnode); err == nil {
 			t.Fatalf("validateListenAddress(%q, dappnode) succeeded", address)
 		}
 	}
@@ -118,7 +118,7 @@ func TestParseFlagsDAppNodeListener(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configuration.listenAddress != "0.0.0.0:3301" || configuration.listenScope != listenScopeDAppNode {
+	if configuration.listenAddress != "0.0.0.0:3301" || configuration.listenScope != listenScopeDappnode {
 		t.Fatalf("configuration = %+v", configuration)
 	}
 }

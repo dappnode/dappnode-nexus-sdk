@@ -1,15 +1,15 @@
-# DAppNode Nexus SDK
+# Dappnode Nexus SDK
 
 A local, OpenAI-compatible client that verifies the Nexus Gateway before any
 prompt is sent.
 
 The SDK runs on your computer or server. At startup it checks a fresh
 attestation from the Nexus Gateway running in a trusted execution environment
-against a policy published by DAppNode. It accepts requests only after that
+against a policy published by Dappnode. It accepts requests only after that
 verification succeeds, then protects prompt and response bodies between the
 local SDK and the verified Gateway.
 
-You do not need a DAppNode to use it.
+You do not need a Dappnode to use it.
 
 ## Install
 
@@ -30,7 +30,7 @@ make build
 ## Download the Nexus trust policy
 
 The maintained policy in this repository identifies the Nexus Gateway
-releases the SDK is allowed to trust. Download it through the DAppNode GitHub
+releases the SDK is allowed to trust. Download it through the Dappnode GitHub
 organization rather than from the Gateway being verified:
 
 ```sh
@@ -38,7 +38,7 @@ curl -fsSLo nexus-gateway-policy.json \
   https://raw.githubusercontent.com/dappnode/dappnode-nexus-sdk/main/nexus-gateway-policy.json
 ```
 
-Keep this file updated when DAppNode publishes support for a new Gateway
+Keep this file updated when Dappnode publishes support for a new Gateway
 release, or let the SDK track releases for you with `--trust-policy-updates`
 described below.
 
@@ -193,10 +193,10 @@ should carry its pinned policy inside the binary.
 See the complete [embedding example](examples/embed/main.go) and the
 [package documentation](https://pkg.go.dev/github.com/dappnode/dappnode-nexus-sdk).
 
-## Using it on DAppNode
+## Using it on Dappnode
 
-DAppNode users can install **Nexus Local Proxy** instead of running the binary
-manually. Applications on the same DAppNode then use:
+Dappnode users can install **Nexus Local Proxy** instead of running the binary
+manually. Applications on the same Dappnode then use:
 
 ```text
 http://nexus-local-proxy.dappnode.private:3301/v1

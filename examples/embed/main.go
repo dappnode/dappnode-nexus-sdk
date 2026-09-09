@@ -12,7 +12,7 @@ import (
 
 func main() {
 	gatewayURL := flag.String("gateway-url", "https://nexus-api-tee.dappnode.com", "Nexus Gateway HTTPS origin")
-	policyFile := flag.String("trust-policy", "nexus-gateway-policy.json", "DAppNode-published trust policy")
+	policyFile := flag.String("trust-policy", "nexus-gateway-policy.json", "Dappnode-published trust policy")
 	listen := flag.String("listen", "127.0.0.1:3301", "local listen address")
 	flag.Parse()
 

@@ -119,15 +119,15 @@ td { padding: 9px 10px 9px 0; border-top: 1px solid var(--line); vertical-align:
 
   <h2>Recent requests</h2>
   <div class="card"><div class="scroll" id="requests"></div>
-    <p class="note" style="margin-top:14px">This list records only envelope identifiers, timing and sizes. Your prompts and the model's replies are never read or stored by this page — they are encrypted before they leave this proxy and decrypted only inside the enclave.</p>
+    <p class="note" style="margin-top:14px">Only identifiers, timing and sizes. Your prompts and the replies are never read or stored here — they are encrypted before they leave this proxy and can only be decrypted inside the TEE.</p>
   </div>
 
   <h2>Verification history</h2>
   <div class="card"><div class="scroll" id="history"></div></div>
 
-  <h2>Trusting this page</h2>
+  <h2>Don't trust this page</h2>
   <div class="card">
-    <p class="note">This page is rendered by the same proxy that performs the verification, so it cannot prove itself. What it can do is hand you the raw signed evidence. Download the attestation document above and check it with an independent AWS Nitro verifier, then compare the measurements against the trust policy pinned in this package. That check does not depend on anything this page says.</p>
+    <p class="note">This page is drawn by the same proxy that did the checking, so it cannot prove itself — you should not have to trust it. Download the evidence above and check it with independent tooling instead. That check does not depend on anything this page says.</p>
     <p class="note">Nothing here is written to disk. The history is kept in memory and starts empty after a restart.</p>
   </div>
 </main>
@@ -178,12 +178,15 @@ function renderHero(data) {
   }
   const expires = current ? new Date(current.expires_at) : null;
   const left = expires ? Math.max(0, Math.round((expires - new Date()) / 1000)) : 0;
-  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — your requests go only to a measured enclave</span></div>'
-    + '<p class="why">Before sending anything, this proxy asked the Nexus Gateway to prove what it is. AWS Nitro hardware signed a '
-    + 'statement naming the exact software running inside the enclave, and that statement matched the measurements pinned locally in this package. '
-    + 'Your request bodies are then encrypted to a key that only that enclave holds, so the network path in between — including Cloudflare and the host machine — carries ciphertext it cannot read.</p>'
-    + '<p class="why" style="color:var(--ink-dim);font-size:13.5px">This proof is re-checked automatically; the current one is valid for another '
-    + left + "s.</p>";
+  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — only the TEE can read your prompts</span></div>'
+    + '<p class="why">This proxy checked that Nexus is running inside the TEE it claims to be, then encrypted your prompts to a key only that TEE holds. '
+    + 'Nobody in between can read them.</p>'
+    + '<details class="more"><summary>How this was checked</summary>'
+    + '<p class="why">A TEE (trusted execution environment) is hardware that can prove which software is running inside it, and keeps everyone else out — including the machine\'s owner. '
+    + 'Before sending anything, this proxy asked Nexus for that proof. The hardware signed a statement naming the exact software running inside, and it matched what Dappnode published for this release. '
+    + 'Your prompts are then encrypted to a key only that software holds, so everything in between carries ciphertext it cannot read.</p>'
+    + '<p class="why">Re-checked automatically. The current proof is valid for another ' + left + 's.</p>'
+    + '</details>';
 }
 
 function renderStats(data) {
@@ -220,12 +223,12 @@ function renderEvidence(data) {
   }
   const facts = [
     ["Attested key ID", current.id],
-    ["Enclave module", current.module_id],
+    ["TEE module", current.module_id],
     ["Attested at", new Date(current.attested_at).toLocaleString()],
     ["Valid until", new Date(current.expires_at).toLocaleString()],
     ["Encryption key (X25519)", current.hpke_public_key],
     ["Challenge nonce", shortHex(current.nonce, 16)],
-    ["PCR0 — enclave image", shortHex(current.pcr0, 16)],
+    ["PCR0 — TEE image", shortHex(current.pcr0, 16)],
     ["PCR1 — kernel and bootstrap", shortHex(current.pcr1, 16)],
     ["PCR2 — application", shortHex(current.pcr2, 16)],
     ["Gateway source revision", current.source_revision],
@@ -272,7 +275,7 @@ function renderHistory(data) {
     target.innerHTML = '<div class="empty">No verifications recorded yet.</div>';
     return;
   }
-  target.innerHTML = "<table><thead><tr><th>Checked at</th><th>Result</th><th>Enclave key</th><th>Details</th></tr></thead><tbody>"
+  target.innerHTML = "<table><thead><tr><th>Checked at</th><th>Result</th><th>TEE key</th><th>Details</th></tr></thead><tbody>"
     + rows.map(row => {
       const ok = row.outcome === "verified";
       return "<tr><td>" + time(row.verified_at) + "</td>"

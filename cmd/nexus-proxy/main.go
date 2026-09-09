@@ -26,7 +26,7 @@ const (
 	shutdownTimeout       = 10 * time.Second
 	stateFlushInterval    = 5 * time.Second
 	listenScopeLoopback   = "loopback"
-	listenScopeDAppNode   = "dappnode"
+	listenScopeDappnode   = "dappnode"
 )
 
 type config struct {
@@ -85,8 +85,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 			logger.Printf("persist verification history on exit: %v", err)
 		}
 	}()
-	if configuration.listenScope == listenScopeDAppNode {
-		logger.Printf("DAppNode network listener enabled on %s; do not publish this port outside the trusted DAppNode environment", configuration.listenAddress)
+	if configuration.listenScope == listenScopeDappnode {
+		logger.Printf("Dappnode network listener enabled on %s; do not publish this port outside the trusted Dappnode environment", configuration.listenAddress)
 	}
 	listener, err := net.Listen("tcp", configuration.listenAddress)
 	if err != nil {
@@ -263,7 +263,7 @@ func validateListenAddress(address, scope string) error {
 		if !ip.IsLoopback() {
 			return errors.New("--listen-scope loopback requires a loopback address such as 127.0.0.1:3301 or [::1]:3301")
 		}
-	case listenScopeDAppNode:
+	case listenScopeDappnode:
 		if !ip.IsUnspecified() {
 			return errors.New("--listen-scope dappnode requires 0.0.0.0 or [::]")
 		}

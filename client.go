@@ -64,7 +64,7 @@ var ErrEvidenceNotFound = errors.New("verification evidence not found")
 // build to trust, never what protection that build owes the caller.
 type TrustPolicyUpdates struct {
 	// Repository is the Gateway repository, "owner/name". Empty uses the
-	// DAppNode Gateway repository.
+	// Dappnode Gateway repository.
 	Repository string
 
 	// Releases is how many recent releases to trust, at most 4. Empty uses 3,
