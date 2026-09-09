@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve the DAppNode Nexus SDK.
+Thanks for helping improve the Dappnode Nexus SDK.
 
 ## Development setup
 
@@ -31,7 +31,7 @@ Keep changes focused, add or update tests for behavior changes, and make sure
 
 The policy in `nexus-gateway-policy.json` is updated only from verified Gateway
 release measurements. Deployment and release runbooks are maintained privately
-by the DAppNode team and are intentionally not part of this public repository.
+by the Dappnode team and are intentionally not part of this public repository.
 
 ## Regenerating the embedded Sigstore trusted root
 

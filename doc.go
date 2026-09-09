@@ -1,5 +1,5 @@
 // Package nexus provides attestation-verified, OpenAI-compatible access to the
-// DAppNode Nexus Gateway.
+// Dappnode Nexus Gateway.
 //
 // New verifies the Gateway before it returns a Client. Applications can mount
 // Client.Handler in an existing HTTP server, give Client.HTTPClient to another
