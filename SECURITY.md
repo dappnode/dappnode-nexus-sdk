@@ -3,7 +3,7 @@
 ## Supported versions
 
 Security fixes are made on the `main` branch. Standalone users should update
-the SDK regularly; Dappnode users should keep Nexus Local Proxy up to date.
+the SDK regularly; Dappnode users should keep Nexus Proofs up to date.
 
 ## Reporting a vulnerability
 
