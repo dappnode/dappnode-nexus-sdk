@@ -53,9 +53,9 @@ func describeEvidence(id string, evidence *attestation.Evidence, verifiedAt time
 				Detail: "The TEE signed the random 32-byte challenge this proxy generated, so the evidence cannot be a replay of an older attestation.",
 			},
 			{
-				Name:   "Freshness: signing time",
+				Name:   "Fresh proof",
 				Passed: true,
-				Detail: fmt.Sprintf("Signed %s before this check. Evidence older than %s is rejected and re-fetched.", age, evidence.ExpiresAt.Sub(evidence.AttestedAt).Round(time.Second)),
+				Detail: signedAgo(age) + ". Proofs older than " + humanDuration(evidence.ExpiresAt.Sub(evidence.AttestedAt)) + " are refused, so an old one can't be reused.",
 			},
 			{
 				Name:   "Code measurements PCR0, PCR1, PCR2",
@@ -85,6 +85,29 @@ func describeEvidence(id string, evidence *attestation.Evidence, verifiedAt time
 		},
 	}
 	return record, proof.Document, proof.Manifest
+}
+
+// signedAgo describes how old the proof was when it was checked. The proxy asks
+// for a new proof right before checking it, so this is nearly always under a
+// second; printing "0s" there read like a bug.
+func signedAgo(age time.Duration) string {
+	if age < 5*time.Second {
+		return "Signed just now"
+	}
+	return "Signed " + humanDuration(age) + " before it was checked"
+}
+
+// humanDuration formats whole seconds or minutes, avoiding forms like "2m0s".
+func humanDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d >= time.Minute && d%time.Minute == 0 {
+		if m := int(d / time.Minute); m == 1 {
+			return "1 minute"
+		} else {
+			return fmt.Sprintf("%d minutes", m)
+		}
+	}
+	return fmt.Sprintf("%d seconds", int(d/time.Second))
 }
 
 func short(value string) string {
