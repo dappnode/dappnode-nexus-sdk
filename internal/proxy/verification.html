@@ -220,7 +220,7 @@ function renderHero(data) {
   const freshness = left > 0
     ? "This proof is good for another " + left + "s."
     : "Checked " + ago(attested) + ". A fresh check runs before the next prompt is sent.";
-  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — only the TEE can read your prompts</span></div>'
+  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — your prompts are encrypted all the way to Nexus</span></div>'
     + '<p class="why">This proxy checked that Nexus is running inside the TEE it claims to be, then encrypted your prompts to a key only that TEE holds. '
     + 'Nobody in between can read them.</p>'
     + '<details class="more" data-key="how"><summary>How this was checked</summary><div class="more-body">'
