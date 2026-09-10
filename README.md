@@ -180,11 +180,11 @@ See the complete [embedding example](examples/embed/main.go) and the
 
 ## Using it on Dappnode
 
-Dappnode users can install **Nexus Local Proxy** instead of running the binary
+Dappnode users can install **Nexus Proofs** instead of running the binary
 manually. Applications on the same Dappnode then use:
 
 ```text
-http://nexus-local-proxy.dappnode.private:3301/v1
+http://nexus-proofs.dappnode.private:3301/v1
 ```
 
 ## What is protected
