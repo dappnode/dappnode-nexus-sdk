@@ -164,6 +164,16 @@ function esc(value) {
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   })[c]);
 }
+function ago(date) {
+  if (!date || isNaN(date)) return "a while ago";
+  const s = Math.max(0, Math.round((Date.now() - date) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return m + (m === 1 ? " minute ago" : " minutes ago");
+  const h = Math.round(m / 60);
+  if (h < 48) return h + (h === 1 ? " hour ago" : " hours ago");
+  return Math.round(h / 24) + " days ago";
+}
 function shortHex(value, keep = 12) {
   if (!value) return "—";
   return value.length <= keep * 2 ? value : value.slice(0, keep) + "…" + value.slice(-6);
@@ -200,15 +210,23 @@ function renderHero(data) {
       + (failure ? '<p class="why mono">' + esc(failure) + "</p>" : "");
     return;
   }
+  // A proof is only reused for a short window, and the proxy fetches a fresh one
+  // when the next request arrives after it lapses -- there is no timer. So an
+  // idle proxy legitimately holds an expired proof, and a countdown pinned at 0s
+  // would suggest something is wrong when nothing is.
+  const attested = current ? new Date(current.attested_at) : null;
   const expires = current ? new Date(current.expires_at) : null;
-  const left = expires ? Math.max(0, Math.round((expires - new Date()) / 1000)) : 0;
-  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — only the TEE can read your prompts</span></div>'
+  const left = expires ? Math.round((expires - new Date()) / 1000) : 0;
+  const freshness = left > 0
+    ? "This proof is good for another " + left + "s."
+    : "Checked " + ago(attested) + ". A fresh check runs before the next prompt is sent.";
+  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — your prompts are encrypted all the way to Nexus</span></div>'
     + '<p class="why">This proxy checked that Nexus is running inside the TEE it claims to be, then encrypted your prompts to a key only that TEE holds. '
     + 'Nobody in between can read them.</p>'
     + '<details class="more" data-key="how"><summary>How this was checked</summary><div class="more-body">'
     + '<p>A TEE (trusted execution environment) is hardware that can prove which software is running inside it, and keeps everyone else out — including the machine\'s owner.</p>'
     + '<p>Before sending anything, this proxy asked Nexus for that proof. The hardware signed a statement naming the exact software running inside, and it matched what Dappnode signed for this Gateway release. Your prompts are then encrypted to a key only that software holds.</p>'
-    + '<p>Re-checked automatically — this proof is good for another ' + left + 's.</p>'
+    + '<p>' + esc(freshness) + '</p>'
     + '</div></details>';
 }
 
