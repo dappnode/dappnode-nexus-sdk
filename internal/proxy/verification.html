@@ -61,6 +61,7 @@ header.top .sub { color: var(--ink-dim); font-size: 13px; }
 .hero.ok .verdict { color: var(--ok); }
 .hero.bad .verdict { color: var(--bad); }
 .hero .why { margin-top: 12px; color: var(--ink); max-width: 68ch; }
+.hero .why a, .note a { color: var(--accent); }
 .dot { width: 11px; height: 11px; border-radius: 50%; background: currentColor; flex: none; }
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 18px; }
@@ -149,9 +150,9 @@ td { padding: 9px 10px 9px 0; border-top: 1px solid var(--line); vertical-align:
   <h2>Verification history</h2>
   <div class="card"><div class="scroll" id="history"></div></div>
 
-  <h2>Verify it independently</h2>
+  <h2>Check it yourself</h2>
   <div class="card">
-    <p class="note">Everything above is backed by the signed evidence, and you can re-check it without this page. The two downloads in <strong>Evidence</strong> are the raw proof, exactly as the hardware produced it.</p>
+    <p class="note">For advanced users: you don't have to trust this page. The downloads in <strong>Evidence</strong> are the raw proof, exactly as the TEE hardware signed it, and the open-source <a href="https://github.com/dappnode/dappnode-nexus-sdk" target="_blank" rel="noopener">Nexus SDK</a> shows how it is verified.</p>
     <p class="note" id="storage-note"></p>
   </div>
 </main>
@@ -219,10 +220,10 @@ function renderHero(data) {
   const left = expires ? Math.round((expires - new Date()) / 1000) : 0;
   const freshness = left > 0
     ? "This proof is good for another " + left + "s."
-    : "Checked " + ago(attested) + ". A fresh check runs before the next prompt is sent.";
-  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified — your prompts are encrypted all the way to Nexus</span></div>'
-    + '<p class="why">This proxy checked that Nexus is running inside the TEE it claims to be, then encrypted your prompts to a key only that TEE holds. '
-    + 'Nobody in between can read them.</p>'
+    : "Checked " + ago(attested) + ".";
+  hero.innerHTML = '<div class="verdict"><span class="dot"></span><span>Verified. Your prompts are running in confidential infrastructure.</span></div>'
+    + '<p class="why">Remember: with Private models you can find proofs of the model <a href="https://nexus.dappnode.com/proofs" target="_blank" rel="noopener">here</a>. '
+    + 'With Anonymous models the inference provider might still see your prompt, even though we can\'t.</p>'
     + '<details class="more" data-key="how"><summary>How this was checked</summary><div class="more-body">'
     + '<p>A TEE (trusted execution environment) is hardware that can prove which software is running inside it, and keeps everyone else out — including the machine\'s owner.</p>'
     + '<p>Before sending anything, this proxy asked Nexus for that proof. The hardware signed a statement naming the exact software running inside, and it matched what Dappnode signed for this Gateway release. Your prompts are then encrypted to a key only that software holds.</p>'
@@ -237,8 +238,8 @@ function renderStorageNote(data) {
   // proxy runs with --state-file — as the Dappnode package does, on a named
   // volume so the history survives restarts and is included in backups.
   el.innerHTML = data.persistent
-    ? "This history is kept on disk so it survives a restart. It holds verification evidence and per-request identifiers, timing and sizes — never a prompt or a reply."
-    : "This history is kept in memory only and starts empty after a restart. It holds verification evidence and per-request identifiers, timing and sizes — never a prompt or a reply.";
+    ? "This history is saved on this Dappnode, so it survives a restart. It stores verification data, timing and sizes — never your prompts or replies."
+    : "This history is kept in memory only, so it starts empty after a restart. It stores verification data, timing and sizes — never your prompts or replies.";
 }
 
 function renderStats(data) {
